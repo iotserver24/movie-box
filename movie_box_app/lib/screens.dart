@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'api.dart';
@@ -17,15 +18,70 @@ void openTitle(
   BuildContext context,
   MovieApi api,
   MovieLibrary library,
-  MovieTitle title,
-) {
+  MovieTitle title, {
+  WatchEntry? resume,
+}) {
   if (title.path.isEmpty) return;
+  final matches = library.history.values.where(
+    (entry) => entry.title.path == title.path,
+  );
+  final last = resume ?? (matches.isEmpty ? null : matches.last);
+  final season = last?.season ?? (title.kind == 'movie' ? 0 : 1);
+  final episode = last?.episode ?? (title.kind == 'movie' ? 0 : 1);
+  final saved = library.downloads[viewingKey(title.path, season, episode)];
   Navigator.of(context).push(
     MaterialPageRoute(
-      builder: (_) =>
-          DetailScreen(api: api, library: library, path: title.path),
+      builder: (_) => PlayerScreen(
+        api: api,
+        library: library,
+        title: title,
+        season: season,
+        episode: episode,
+        offline: saved != null && File(saved.path).existsSync() ? saved : null,
+      ),
     ),
   );
+}
+
+String artworkUrl(String source, int width) {
+  final uri = Uri.tryParse(source);
+  if (uri == null || uri.host != 'pbcdnw.aoneroom.com') return source;
+  return uri
+      .replace(
+        queryParameters: {
+          ...uri.queryParameters,
+          'x-oss-process': 'image/resize,w_$width',
+        },
+      )
+      .toString();
+}
+
+class Artwork extends StatelessWidget {
+  final String? url;
+  final int width;
+  const Artwork({super.key, this.url, this.width = 420});
+
+  @override
+  Widget build(BuildContext context) => url == null || url!.isEmpty
+      ? const ColoredBox(
+          color: Color(0xFF273238),
+          child: Icon(Icons.movie, size: 40),
+        )
+      : CachedNetworkImage(
+          imageUrl: artworkUrl(url!, width),
+          fit: BoxFit.cover,
+          memCacheWidth: width,
+          maxWidthDiskCache: width,
+          fadeInDuration: const Duration(milliseconds: 120),
+          placeholder: (_, _) => const ColoredBox(
+            color: Color(0xFF273238),
+            child: Center(child: Icon(Icons.movie_outlined, size: 32)),
+          ),
+          errorWidget: (_, _, _) => const ColoredBox(
+            color: Color(0xFF273238),
+            child: Icon(Icons.movie, size: 40),
+          ),
+        );
 }
 
 class Poster extends StatelessWidget {
@@ -45,19 +101,7 @@ class Poster extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             child: AspectRatio(
               aspectRatio: 2 / 3,
-              child: title.poster == null
-                  ? const ColoredBox(
-                      color: Color(0xFF273238),
-                      child: Icon(Icons.movie, size: 40),
-                    )
-                  : Image.network(
-                      title.poster!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const ColoredBox(
-                        color: Color(0xFF273238),
-                        child: Icon(Icons.movie, size: 40),
-                      ),
-                    ),
+              child: Artwork(url: title.poster),
             ),
           ),
           const SizedBox(height: 7),
@@ -78,13 +122,14 @@ class TitleGrid extends StatelessWidget {
   final void Function(MovieTitle) onTap;
   const TitleGrid({super.key, required this.items, required this.onTap});
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final columns = (constraints.maxWidth / 155).floor().clamp(2, 6);
-      return GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  Widget build(BuildContext context) {
+    final columns = (MediaQuery.sizeOf(context).width / 155).floor().clamp(
+      2,
+      6,
+    );
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      sliver: SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
           crossAxisSpacing: 12,
@@ -94,9 +139,9 @@ class TitleGrid extends StatelessWidget {
         itemCount: items.length,
         itemBuilder: (_, index) =>
             Poster(title: items[index], onTap: () => onTap(items[index])),
-      );
-    },
-  );
+      ),
+    );
+  }
 }
 
 class ScreenHeader extends StatelessWidget {
@@ -133,6 +178,22 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late Future<MovieHome> data = widget.api.home();
+  @override
+  void initState() {
+    super.initState();
+    widget.library.addListener(refreshHistory);
+  }
+
+  @override
+  void dispose() {
+    widget.library.removeListener(refreshHistory);
+    super.dispose();
+  }
+
+  void refreshHistory() {
+    if (mounted) setState(() {});
+  }
+
   void reload() => setState(() => data = widget.api.home());
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
@@ -172,80 +233,59 @@ class _HomeScreenState extends State<HomeScreen> {
         return ListView(
           children: [
             const ScreenHeader('MovieBox'),
-            if (home.banners.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: InkWell(
-                  onTap: () => openTitle(
-                    context,
-                    widget.api,
-                    widget.library,
-                    home.banners.first,
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: Stack(
-                      alignment: Alignment.bottomLeft,
-                      children: [
-                        SizedBox(
-                          height: 265,
-                          width: double.infinity,
-                          child: Image.network(
-                            home.banners.first.backdrop ??
-                                home.banners.first.poster ??
-                                '',
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                const ColoredBox(color: Color(0xFF273238)),
-                          ),
-                        ),
-                        Container(
-                          height: 145,
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Color(0xEE101519)],
+            PopularCarousel(
+              titles: home.sections
+                  .where(
+                    (section) =>
+                        section.title.toLowerCase().contains('popular'),
+                  )
+                  .expand((section) => section.items)
+                  .take(6)
+                  .toList(),
+              fallback: home.banners,
+              onTap: (title) =>
+                  openTitle(context, widget.api, widget.library, title),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Wrap(
+                spacing: 8,
+                children: [
+                  for (final category in [
+                    ('movies', 'Movies'),
+                    ('series', 'Series'),
+                    ('animation', 'Anime'),
+                  ])
+                    ActionChip(
+                      label: Text(category.$2),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => Scaffold(
+                            appBar: AppBar(title: Text(category.$2)),
+                            body: CatalogScreen(
+                              api: widget.api,
+                              library: widget.library,
+                              name: category.$1,
+                              label: category.$2,
                             ),
                           ),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'FEATURED',
-                                style: TextStyle(
-                                  color: Color(0xFFF2B86B),
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                              Text(
-                                home.banners.first.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 25,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Text('Explore title  ›'),
-                            ],
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
+            ),
             if (history.isNotEmpty)
-              MovieRow(
-                'Continue Watching',
-                history.map((e) => e.title).toList(),
-                (title) =>
-                    openTitle(context, widget.api, widget.library, title),
+              ContinueRow(
+                history,
+                (entry) => openTitle(
+                  context,
+                  widget.api,
+                  widget.library,
+                  entry.title,
+                  resume: entry,
+                ),
               ),
             for (final section in home.sections)
               if (section.items.isNotEmpty)
@@ -259,6 +299,198 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     ),
+  );
+}
+
+class PopularCarousel extends StatefulWidget {
+  final List<MovieTitle> titles, fallback;
+  final void Function(MovieTitle) onTap;
+  const PopularCarousel({
+    super.key,
+    required this.titles,
+    required this.fallback,
+    required this.onTap,
+  });
+  @override
+  State<PopularCarousel> createState() => _PopularCarouselState();
+}
+
+class _PopularCarouselState extends State<PopularCarousel> {
+  int index = 0;
+  @override
+  Widget build(BuildContext context) {
+    final titles = widget.titles.isEmpty ? widget.fallback : widget.titles;
+    if (titles.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: [
+        SizedBox(
+          height: 265,
+          child: PageView.builder(
+            itemCount: titles.length,
+            onPageChanged: (value) => setState(() => index = value),
+            itemBuilder: (context, page) {
+              final title = titles[page];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: InkWell(
+                  onTap: () => widget.onTap(title),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: Stack(
+                      alignment: Alignment.bottomLeft,
+                      children: [
+                        SizedBox.expand(
+                          child: Artwork(
+                            url: title.backdrop ?? title.poster,
+                            width: 900,
+                          ),
+                        ),
+                        Container(
+                          height: 150,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Color(0xEE101519)],
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'POPULAR NOW',
+                                style: TextStyle(
+                                  color: Color(0xFFF2B86B),
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 2,
+                                ),
+                              ),
+                              Text(
+                                title.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 25,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Text('Watch now  ›'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < titles.length; i++)
+                Container(
+                  width: i == index ? 18 : 6,
+                  height: 6,
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    color: i == index
+                        ? const Color(0xFFF2B86B)
+                        : Colors.white38,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class ContinueRow extends StatelessWidget {
+  final List<WatchEntry> entries;
+  final void Function(WatchEntry) onTap;
+  const ContinueRow(this.entries, this.onTap, {super.key});
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Padding(
+        padding: EdgeInsets.fromLTRB(18, 14, 18, 12),
+        child: Text(
+          'Continue Watching',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+      ),
+      SizedBox(
+        height: 260,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          itemCount: entries.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 12),
+          itemBuilder: (_, index) {
+            final entry = entries[index];
+            final progress = entry.durationSeconds <= 0
+                ? 0.0
+                : (entry.positionSeconds / entry.durationSeconds).clamp(
+                    0.0,
+                    1.0,
+                  );
+            return SizedBox(
+              width: 155,
+              child: InkWell(
+                onTap: () => onTap(entry),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        height: 175,
+                        width: 155,
+                        child: Artwork(url: entry.title.poster),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 4,
+                      backgroundColor: const Color(0xFF343D41),
+                      color: const Color(0xFFDF4B47),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      entry.title.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      entry.season > 0
+                          ? 'S${entry.season} E${entry.episode} · ${entry.positionSeconds ~/ 60} min'
+                          : '${entry.positionSeconds ~/ 60} min watched',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFFBCC8C9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ],
   );
 }
 
@@ -382,9 +614,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
       });
       await load();
     },
-    child: ListView(
-      children: [
-        ScreenHeader(widget.label),
+    child: CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: ScreenHeader(widget.label)),
         if (items.isNotEmpty)
           TitleGrid(
             items: items,
@@ -392,26 +624,34 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 openTitle(context, widget.api, widget.library, title),
           ),
         if (items.isEmpty && error == null && !loading)
-          const Padding(
-            padding: EdgeInsets.all(32),
-            child: Center(child: Text('No titles found.')),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: Text('No titles found.')),
+            ),
           ),
         if (error != null)
-          SizedBox(
-            height: items.isEmpty ? 320 : 100,
-            child: ErrorPanel(error: error!, retry: load),
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: items.isEmpty ? 320 : 100,
+              child: ErrorPanel(error: error!, retry: load),
+            ),
           ),
         if (loading)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
           ),
         if (!loading && next != null && error == null)
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: OutlinedButton(
-              onPressed: load,
-              child: const Text('Load more'),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: OutlinedButton(
+                onPressed: load,
+                child: const Text('Load more'),
+              ),
             ),
           ),
       ],
@@ -433,6 +673,7 @@ class _SearchScreenState extends State<SearchScreen> {
   List<String> hints = [];
   int? next;
   bool loading = false;
+  bool hasSearched = false;
   Object? error;
   Timer? debounce;
   int generation = 0;
@@ -457,10 +698,12 @@ class _SearchScreenState extends State<SearchScreen> {
   void changed(String query) {
     debounce?.cancel();
     generation++;
+    final serial = generation;
     setState(() {
       items.clear();
       next = null;
       loading = false;
+      hasSearched = false;
       error = null;
       hints = [];
     });
@@ -468,19 +711,15 @@ class _SearchScreenState extends State<SearchScreen> {
       widget.api
           .popular()
           .then((value) {
-            if (mounted && text.text.isEmpty) setState(() => hints = value);
+            if (mounted && serial == generation) setState(() => hints = value);
           })
           .catchError((_) {});
       return;
     }
-    final serial = generation;
-    debounce = Timer(const Duration(milliseconds: 350), () {
-      widget.api
-          .suggestions(query.trim())
-          .then((value) {
-            if (mounted && serial == generation) setState(() => hints = value);
-          })
-          .catchError((_) {});
+    debounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted || serial != generation) return;
+      setState(() => next = 1);
+      load();
     });
   }
 
@@ -498,6 +737,7 @@ class _SearchScreenState extends State<SearchScreen> {
       hints = [];
       next = 1;
       loading = false;
+      hasSearched = false;
       error = null;
     });
     FocusScope.of(context).unfocus();
@@ -518,6 +758,7 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         items.addAll(result.items);
         next = result.next;
+        hasSearched = true;
       });
     } catch (e) {
       if (mounted && serial == generation) setState(() => error = e);
@@ -527,75 +768,90 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => ListView(
-    children: [
-      const ScreenHeader('Search'),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: TextField(
-          controller: text,
-          autofocus: false,
-          textInputAction: TextInputAction.search,
-          onChanged: changed,
-          onSubmitted: (_) => submit(),
-          decoration: InputDecoration(
-            hintText: 'Find a movie or series',
-            prefixIcon: const Icon(Icons.search),
-            suffixIcon: IconButton(
-              tooltip: 'Search',
-              icon: const Icon(Icons.arrow_forward),
-              onPressed: submit,
+  Widget build(BuildContext context) => CustomScrollView(
+    slivers: [
+      SliverToBoxAdapter(
+        child: Column(
+          children: [
+            const ScreenHeader('Search'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: text,
+                textInputAction: TextInputAction.search,
+                onChanged: changed,
+                onSubmitted: (_) => submit(),
+                decoration: InputDecoration(
+                  hintText: 'Find a movie or series',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: IconButton(
+                    tooltip: 'Search',
+                    icon: const Icon(Icons.arrow_forward),
+                    onPressed: submit,
+                  ),
+                ),
+              ),
             ),
-          ),
+            if (hints.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.fromLTRB(18, 20, 18, 4),
+                child: Text(
+                  'POPULAR SEARCHES',
+                  style: TextStyle(
+                    color: Color(0xFFF2B86B),
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+              for (final hint in hints.take(10))
+                ListTile(
+                  title: Text(hint),
+                  trailing: const Icon(Icons.north_west, size: 18),
+                  onTap: () => submit(hint),
+                ),
+            ],
+          ],
         ),
       ),
-      if (hints.isNotEmpty) ...[
-        const Padding(
-          padding: EdgeInsets.fromLTRB(18, 20, 18, 4),
-          child: Text(
-            'SUGGESTIONS',
-            style: TextStyle(color: Color(0xFFF2B86B), letterSpacing: 1.5),
-          ),
-        ),
-        for (final hint in hints.take(10))
-          ListTile(
-            title: Text(hint),
-            trailing: const Icon(Icons.north_west, size: 18),
-            onTap: () => submit(hint),
-          ),
-      ],
       if (items.isNotEmpty)
         TitleGrid(
           items: items,
           onTap: (title) =>
               openTitle(context, widget.api, widget.library, title),
         ),
-      if (next == null &&
+      if (hasSearched &&
           !loading &&
           error == null &&
-          hints.isEmpty &&
           text.text.isNotEmpty &&
           items.isEmpty)
-        const Padding(
-          padding: EdgeInsets.all(30),
-          child: Center(child: Text('No results found.')),
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(30),
+            child: Center(child: Text('No results found.')),
+          ),
         ),
       if (error != null)
-        SizedBox(
-          height: 250,
-          child: ErrorPanel(error: error!, retry: load),
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 250,
+            child: ErrorPanel(error: error!, retry: load),
+          ),
         ),
       if (loading)
-        const Padding(
-          padding: EdgeInsets.all(24),
-          child: Center(child: CircularProgressIndicator()),
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          ),
         ),
       if (!loading && next != null && error == null)
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: OutlinedButton(
-            onPressed: load,
-            child: const Text('Load more'),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: OutlinedButton(
+              onPressed: load,
+              child: const Text('Load more'),
+            ),
           ),
         ),
     ],
@@ -744,14 +1000,7 @@ class _DetailScreenState extends State<DetailScreen> {
           children: [
             SizedBox(
               height: 230,
-              child: title.backdrop == null && title.poster == null
-                  ? const ColoredBox(color: Color(0xFF273238))
-                  : Image.network(
-                      title.backdrop ?? title.poster!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          const ColoredBox(color: Color(0xFF273238)),
-                    ),
+              child: Artwork(url: title.backdrop ?? title.poster, width: 1080),
             ),
             Padding(
               padding: const EdgeInsets.all(18),
@@ -980,33 +1229,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final history = widget.library.history.values.toList().reversed.toList();
     return ListView(
       children: [
-        const ScreenHeader('Your library'),
+        const ScreenHeader('Downloads'),
         const Padding(
           padding: EdgeInsets.fromLTRB(18, 8, 18, 4),
           child: Text(
-            'Continue Watching',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-        ),
-        if (history.isEmpty)
-          const ListTile(
-            title: Text('Nothing in progress yet.'),
-            subtitle: Text('Your place is saved as you watch.'),
-          ),
-        for (final entry in history)
-          ListTile(
-            leading: const Icon(Icons.play_circle_outline),
-            title: Text(entry.title.title),
-            subtitle: Text(
-              '${entry.season > 0 ? 'S${entry.season} E${entry.episode} · ' : ''}${Duration(seconds: entry.positionSeconds).inMinutes} min watched',
-            ),
-            onTap: () =>
-                openTitle(context, widget.api, widget.library, entry.title),
-          ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(18, 22, 18, 4),
-          child: Text(
-            'Downloads',
+            'Saved on this device',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
         ),
@@ -1020,7 +1247,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             leading: const Icon(Icons.offline_pin_outlined),
             title: Text(entry.title.title),
             subtitle: Text(
-              '${entry.resolution}p${entry.season > 0 ? ' · S${entry.season} E${entry.episode}' : ''}',
+              '${entry.resolution}p${entry.season > 0 ? ' · S${entry.season} E${entry.episode}' : ''} · ${entry.subtitlePath != null && File(entry.subtitlePath!).existsSync() ? 'Subtitles saved' : 'No subtitles'}',
             ),
             onTap: () => Navigator.push(
               context,
@@ -1060,6 +1287,108 @@ class _LibraryScreenState extends State<LibraryScreen> {
               },
             ),
           ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(18, 24, 18, 4),
+          child: Text(
+            'Continue Watching',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+        ),
+        if (history.isEmpty)
+          const ListTile(
+            title: Text('Nothing in progress yet.'),
+            subtitle: Text('Your place is saved as you watch.'),
+          ),
+        for (final entry in history)
+          ListTile(
+            leading: const Icon(Icons.play_circle_outline),
+            title: Text(entry.title.title),
+            subtitle: Text(
+              '${entry.season > 0 ? 'S${entry.season} E${entry.episode} · ' : ''}${Duration(seconds: entry.positionSeconds).inMinutes} min watched',
+            ),
+            onTap: () {
+              final saved = widget.library.downloads[entry.key];
+              if (saved != null && File(saved.path).existsSync()) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PlayerScreen(
+                      api: widget.api,
+                      library: widget.library,
+                      title: entry.title,
+                      season: entry.season,
+                      episode: entry.episode,
+                      offline: saved,
+                    ),
+                  ),
+                );
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PlayerScreen(
+                      api: widget.api,
+                      library: widget.library,
+                      title: entry.title,
+                      season: entry.season,
+                      episode: entry.episode,
+                    ),
+                  ),
+                );
+              }
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class BookmarksScreen extends StatefulWidget {
+  final MovieApi api;
+  final MovieLibrary library;
+  const BookmarksScreen({super.key, required this.api, required this.library});
+  @override
+  State<BookmarksScreen> createState() => _BookmarksScreenState();
+}
+
+class _BookmarksScreenState extends State<BookmarksScreen> {
+  @override
+  void initState() {
+    super.initState();
+    widget.library.addListener(refresh);
+  }
+
+  @override
+  void dispose() {
+    widget.library.removeListener(refresh);
+    super.dispose();
+  }
+
+  void refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final titles = widget.library.bookmarks.values.toList().reversed.toList();
+    return CustomScrollView(
+      slivers: [
+        const SliverToBoxAdapter(child: ScreenHeader('Library')),
+        if (titles.isEmpty)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'No bookmarks yet. Save titles from the watch page to find them here.',
+              ),
+            ),
+          ),
+        if (titles.isNotEmpty)
+          TitleGrid(
+            items: titles,
+            onTap: (title) =>
+                openTitle(context, widget.api, widget.library, title),
+          ),
       ],
     );
   }
@@ -1069,11 +1398,13 @@ class SettingsScreen extends StatefulWidget {
   final MovieApi api;
   final MovieLibrary library;
   final VoidCallback onSaved;
+  final bool standalone;
   const SettingsScreen({
     super.key,
     required this.api,
     required this.library,
     required this.onSaved,
+    this.standalone = false,
   });
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -1105,7 +1436,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await candidate.ping();
       await widget.library.configure(raw, token.text.trim());
       widget.onSaved();
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        if (widget.standalone) {
+          Navigator.pop(context);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Server connection saved.')),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -1115,18 +1454,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Server settings')),
-    body: ListView(
+  Widget build(BuildContext context) {
+    final content = ListView(
       padding: const EdgeInsets.all(18),
       children: [
+        if (!widget.standalone)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Settings',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+          ),
         const Text(
           'Connect to your scraper',
           style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
         const Text(
-          'The Android emulator uses 10.0.2.2 to reach the computer running Docker. For a phone, use that computer’s private network address and bind the server to it.',
+          'The default server is the hosted MovieBox API. You can enter another HTTPS API URL here, or 10.0.2.2 for a locally running Android emulator.',
         ),
         const SizedBox(height: 22),
         TextField(
@@ -1134,7 +1480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           keyboardType: TextInputType.url,
           decoration: const InputDecoration(
             labelText: 'API address',
-            hintText: 'http://10.0.2.2:8000',
+            hintText: 'https://movie-box.n92dev.us.kg',
           ),
         ),
         const SizedBox(height: 16),
@@ -1155,6 +1501,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Use this app and server only on a trusted network or private VPN.',
         ),
       ],
-    ),
-  );
+    );
+    return widget.standalone
+        ? Scaffold(
+            appBar: AppBar(title: const Text('Server settings')),
+            body: content,
+          )
+        : content;
+  }
 }

@@ -79,26 +79,14 @@ class _MovieBoxAppState extends State<MovieBoxApp> {
             index: tab,
             children: [
               HomeScreen(api: api, library: widget.library),
-              CatalogScreen(
-                api: api,
-                library: widget.library,
-                name: 'movies',
-                label: 'Movies',
-              ),
-              CatalogScreen(
-                api: api,
-                library: widget.library,
-                name: 'series',
-                label: 'Series',
-              ),
-              CatalogScreen(
-                api: api,
-                library: widget.library,
-                name: 'animation',
-                label: 'Animation',
-              ),
-              SearchScreen(api: api, library: widget.library),
               LibraryScreen(api: api, library: widget.library),
+              SearchScreen(api: api, library: widget.library),
+              BookmarksScreen(api: api, library: widget.library),
+              SettingsScreen(
+                api: api,
+                library: widget.library,
+                onSaved: updated,
+              ),
             ],
           ),
         ),
@@ -112,32 +100,31 @@ class _MovieBoxAppState extends State<MovieBoxApp> {
               label: 'Home',
             ),
             NavigationDestination(
-              icon: Icon(Icons.movie_outlined),
-              selectedIcon: Icon(Icons.movie),
-              label: 'Movies',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.tv_outlined),
-              selectedIcon: Icon(Icons.tv),
-              label: 'Series',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.auto_awesome_outlined),
-              selectedIcon: Icon(Icons.auto_awesome),
-              label: 'Anime',
+              icon: Icon(Icons.download_outlined),
+              selectedIcon: Icon(Icons.download),
+              label: 'Downloads',
             ),
             NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
             NavigationDestination(
-              icon: Icon(Icons.video_library_outlined),
-              selectedIcon: Icon(Icons.video_library),
+              icon: Icon(Icons.bookmark_border),
+              selectedIcon: Icon(Icons.bookmark),
               label: 'Library',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.settings_outlined),
+              selectedIcon: Icon(Icons.settings),
+              label: 'Settings',
             ),
           ],
         ),
       ),
       routes: {
-        '/settings': (_) =>
-            SettingsScreen(api: api, library: widget.library, onSaved: updated),
+        '/settings': (_) => SettingsScreen(
+          api: api,
+          library: widget.library,
+          onSaved: updated,
+          standalone: true,
+        ),
       },
     );
   }

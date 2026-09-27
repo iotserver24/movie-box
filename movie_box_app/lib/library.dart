@@ -11,12 +11,20 @@ import 'model.dart';
 
 class MovieLibrary extends ChangeNotifier {
   final SharedPreferences prefs;
-  late String server = prefs.getString('server') ?? 'http://10.0.2.2:8000';
+  late String server =
+      prefs.getString('server') ?? 'https://movie-box.n92dev.us.kg';
   late String token = prefs.getString('token') ?? '';
   late final Map<String, WatchEntry> history = {
     for (final item in jsonDecode(prefs.getString('history') ?? '[]') as List)
       (WatchEntry.fromJson(item as Map<String, dynamic>))
           .key: WatchEntry.fromJson(
+        item,
+      ),
+  };
+  late final Map<String, MovieTitle> bookmarks = {
+    for (final item in jsonDecode(prefs.getString('bookmarks') ?? '[]') as List)
+      (MovieTitle.fromJson(item as Map<String, dynamic>))
+          .path: MovieTitle.fromJson(
         item,
       ),
   };
@@ -54,6 +62,19 @@ class MovieLibrary extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> toggleBookmark(MovieTitle title) async {
+    if (bookmarks.containsKey(title.path)) {
+      bookmarks.remove(title.path);
+    } else {
+      bookmarks[title.path] = title;
+    }
+    await prefs.setString(
+      'bookmarks',
+      jsonEncode(bookmarks.values.map((item) => item.toJson()).toList()),
+    );
+    notifyListeners();
+  }
+
   Future<void> addDownload(SavedDownload entry) async {
     downloads[entry.key] = entry;
     await _saveDownloads();
@@ -85,7 +106,18 @@ class DownloadTask extends ChangeNotifier {
   int received = 0;
   int? total;
   String? error;
+  bool _disposed = false;
   void cancel() => cancelled = true;
+  void _update() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    cancel();
+    _disposed = true;
+    super.dispose();
+  }
 
   Future<SavedDownload?> start(
     MovieApi api,
@@ -100,20 +132,22 @@ class DownloadTask extends ChangeNotifier {
     active = true;
     cancelled = false;
     error = null;
-    notifyListeners();
-    final directory = await getApplicationDocumentsDirectory();
-    final file = File(
-      '${directory.path}/${title.path}-$season-$episode-${stream.resolution}.mp4.part',
-    );
-    final completed = File(file.path.substring(0, file.path.length - 5));
+    _update();
     final downloadClient = http.Client();
     try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File(
+        '${directory.path}/${title.path}-$season-$episode-${stream.resolution}.mp4.part',
+      );
+      final completed = File(file.path.substring(0, file.path.length - 5));
       var candidate = stream;
       for (var attempt = 0; attempt < 2; attempt++) {
         final offset = await file.exists() ? await file.length() : 0;
         final request = http.Request('GET', Uri.parse(candidate.url));
         request.headers.addAll(candidate.headers);
-        if (offset > 0) request.headers['Range'] = 'bytes=$offset-';
+        request.headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36';
+        request.headers['Range'] = 'bytes=$offset-';
+        request.headers['Accept-Encoding'] = 'identity';
         final response = await downloadClient.send(request);
         if (response.statusCode == 403 || response.statusCode == 401) {
           await response.stream.drain();
@@ -138,13 +172,19 @@ class DownloadTask extends ChangeNotifier {
         final length = response.contentLength;
         total = length == null ? null : received + length;
         final sink = file.openWrite(mode: FileMode.append);
+        var lastUpdate = DateTime.now();
         try {
           await for (final chunk in response.stream) {
             if (cancelled) break;
             sink.add(chunk);
             received += chunk.length;
-            notifyListeners();
+            final now = DateTime.now();
+            if (now.difference(lastUpdate).inMilliseconds >= 150) {
+              _update();
+              lastUpdate = now;
+            }
           }
+          _update();
         } finally {
           await sink.flush();
           await sink.close();
@@ -183,12 +223,12 @@ class DownloadTask extends ChangeNotifier {
       throw ApiException('The download link expired. Try again.');
     } catch (e) {
       error = '$e';
-      notifyListeners();
+      _update();
       rethrow;
     } finally {
       downloadClient.close();
       active = false;
-      notifyListeners();
+      _update();
     }
   }
 }

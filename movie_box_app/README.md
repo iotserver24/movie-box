@@ -18,14 +18,14 @@ flutter pub get
 flutter run
 ```
 
-The default API address `http://10.0.2.2:8000` reaches the host's localhost from the standard Android emulator. On a physical phone, set `SCRAPER_BIND` in the parent's `.env` to the host's private network address, set `SCRAPER_API_TOKEN`, restart Docker Compose, and enter `http://<host-private-ip>:8000` and the token in the app's Settings. Keep the device and server on the same trusted network or private VPN; do not publish the unauthenticated service to the internet.
+The default API address is `https://movie-box.n92dev.us.kg`. Settings can override it for another deployment, including `http://10.0.2.2:8000` for a locally running scraper on the standard Android emulator. If the server requires `SCRAPER_API_TOKEN`, enter the token in Settings. Keep any local HTTP deployment on a trusted network or private VPN; use HTTPS for a public hostname.
 
 ## Features
 
-- Home sections, movie/series/animation catalogs, suggestions, search pagination, details, seasons and episodes.
-- Playback of current MP4 streams with quality selection, seeking, and separate SRT subtitle selection. The app obtains a fresh signed URL each time playback starts.
-- MP4 download into private app storage with on-screen progress and partial-file resume on retry. If a signed link expires, it is refreshed once. Downloaded English subtitles are saved when the provider supplies them. Downloads run **only while the app stays open**; pause or leaving the page retains the partial file for retry.
-- Offline playback and removal from the Library tab. Local Continue Watching progress resumes by title, season, and episode and clears near the end.
+- Five bottom tabs: Home, Downloads, Search, Library (bookmarked titles), and Settings. Home includes a popular carousel, catalogs, cached artwork, and Continue Watching cards with episode, watched time, and a red progress bar. Search returns results as you type.
+- Tapping a title opens the watch page and starts playback directly, resuming its most recently watched episode and position. The video sits above download, quality, subtitle, title, and episode controls. English subtitles are selected automatically when available; fullscreen controls hide during playback. Tap to show controls, double-tap the left or right side to seek ten seconds, or use Space, Left/Right arrows, F, and Escape with a keyboard.
+- Download quality and subtitle-language selection, on-screen progress, and partial-file resume on retry. A signed video link is refreshed once when it expires. Downloads run **only while the app stays open**; pause or leaving the page retains the partial file for retry. The Downloads tab shows whether a subtitle was saved.
+- Offline playback from Downloads with saved subtitles, automatic Continue Watching progress by title/season/episode, and delete confirmation.
 
 Android's local HTTP access is enabled for a private scraper server. For a remote deployment, use HTTPS. MovieBox may change or restrict streams; the API's `limited`/`vip_locked` state does not bypass those restrictions.
 
