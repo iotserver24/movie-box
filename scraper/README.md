@@ -4,7 +4,7 @@ A personal, Dockerized API for the public MovieBox catalog. The Android client s
 
 ## Start
 
-From the `movie-box` directory:
+From the `movie-box` directory, with Docker and the Compose plugin installed (copy `.env.example` only on first setup):
 
 ```sh
 cp .env.example .env
@@ -28,19 +28,31 @@ By default the port is bound to localhost only. For an Android device on the sam
 - `GET /v1/titles/{detail_path}/playback?season=1&episode=1`: current MP4/DASH/HLS variants and request headers. Movies use the default season/episode `0`. Call again when a signed link expires.
 - `GET /v1/titles/{detail_path}/captions?stream_id=...&season=1&episode=1`: separate subtitle URLs for a selected playback stream. Match season/episode to the playback request.
 
-Example:
+Example for a local API with no token configured:
 
 ```sh
-curl 'http://127.0.0.1:8000/v1/titles/masters-of-the-universe-g6fDdvegRi9/playback'
+curl 'http://127.0.0.1:8000/v1/catalog/movies?page=1'
 ```
+
+When `SCRAPER_API_TOKEN` is set, use an HTTP client configured with the matching bearer token. For title endpoints, use a `detail_path` returned by the catalog or search and only request content you are authorized to access. These routes contact the upstream provider; use `/health` for a local service check without upstream requests.
 
 Catalog and detail responses have a short in-memory cache; playback and caption links are fetched fresh and never cached. `max_resolution` reports the site's current player limit separately from listed stream variants. The scraper does not proxy or store video. Downloads and Continue Watching belong in the Android app; it should refresh links on playback/download retry and persist progress locally.
 
 ## Tests
+
+Use Python 3.12 in a virtual environment; see the [setup guide](../docs/setup.md). From the repository root:
 
 ```sh
 python -m pip install -r scraper/requirements-dev.txt
 python -m pytest scraper/tests -q
 ```
 
-Live checks should use a small byte-range request, not download an entire movie. Site behavior can change; update the provider adapter and its fixtures without changing the app-facing API.
+Tests use fixtures and mocked HTTP responses. If a live check is necessary, use only media you are authorized to access and a small byte-range request, not an entire movie. Site behavior can change; update the provider adapter and its fixtures without changing the app-facing API.
+
+## Security and license
+
+`/health`, `/docs`, `/redoc`, and `/openapi.json` are not protected by the API token. The health check does not contact the upstream provider. See [security](../SECURITY.md), [privacy](../docs/privacy.md), and [architecture](../docs/architecture.md) before deploying beyond localhost.
+
+Created by **[R3AP3R Editz](https://github.com/iotserver24)** and distributed under the [custom source-available license](../LICENSE): retain creator credit, never add ads, and never sell the software or charge for access to it or derivatives. Third-party code and media retain their own rights. [Donate optionally](https://ai.xibebase.in).
+
+The Dockerfile includes the project license at `/app/LICENSE` and creator/dependency acknowledgments at `/app/CREDITS.md`. These files do not replace the required dependency-license review before distributing an image.

@@ -4,13 +4,13 @@ Flutter client for the scraper API in `../scraper`. The app does not scrape Movi
 
 ## Run
 
-Start the scraper from the parent directory:
+Start the scraper from the repository root (the parent of `movie_box_app/`). On first setup, copy `.env.example` to `.env` and configure it as described in the [setup guide](../docs/setup.md):
 
 ```sh
 docker compose up -d --build
 ```
 
-Then run on an Android emulator or device:
+Then, from the repository root, run on an Android emulator or device with a Flutter SDK whose Dart version satisfies `^3.13.1`:
 
 ```sh
 cd movie_box_app
@@ -36,3 +36,13 @@ flutter analyze
 flutter test
 flutter build apk --debug
 ```
+
+## Credits, privacy, and license
+
+Created by **[R3AP3R Editz](https://github.com/iotserver24)**. Open **Settings → Credits and licenses** for creator attribution, the full custom license and project acknowledgments bundled for offline reading, and Flutter's dependency-license page. The optional donation address can be copied without contacting a website. See the [project README](../README.md), [privacy notes](../docs/privacy.md), and [credits](../CREDITS.md).
+
+Run `python3 scripts/sync_notices.py --check` from the repository root before building. If the canonical root notices changed, run the same command without `--check` and include the updated bundled assets. Formatting, static analysis, and all 14 Flutter tests passed with Flutter 3.47.5 stable (Dart 3.13.4), including notice access and synchronization. This does not replace Android build, signing, or installed-device checks; see the release checklist.
+
+Production builds require externally supplied signing credentials; see [Android signing](../docs/signing.md). Missing release-signing configuration must fail a normal release build. Debug builds do not require production credentials.
+
+The [custom source-available license](../LICENSE) requires proper creator credit and prohibits advertising and selling the software or charging for access, including in derivatives. Dependencies retain their own licenses. [Optional donations](https://ai.xibebase.in) support development without unlocking features.

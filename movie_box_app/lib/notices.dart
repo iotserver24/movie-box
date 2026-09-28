@@ -1,0 +1,136 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+const projectUrl = 'https://github.com/iotserver24/movie-box';
+const donationUrl = 'https://ai.xibebase.in';
+
+class CreditsScreen extends StatelessWidget {
+  const CreditsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Credits and licenses')),
+    body: ListView(
+      padding: const EdgeInsets.all(18),
+      children: [
+        Text(
+          'Movie Box by R3AP3R Editz',
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 12),
+        const SelectableText(projectUrl),
+        const SizedBox(height: 18),
+        const Text(
+          'Source-available, not OSI-approved open source. '
+          'Keep creator credit, never add advertising, and never sell '
+          'the software or charge for access. See the full license below.',
+        ),
+        const SizedBox(height: 12),
+        ListTile(
+          leading: const Icon(Icons.description_outlined),
+          title: const Text('Movie Box license'),
+          subtitle: const Text('Full terms, available offline'),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const BundledNoticeScreen(
+                title: 'Movie Box license',
+                asset: 'assets/notices/LICENSE',
+              ),
+            ),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.people_outline),
+          title: const Text('Project acknowledgments'),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const BundledNoticeScreen(
+                title: 'Project acknowledgments',
+                asset: 'assets/notices/CREDITS.md',
+              ),
+            ),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.article_outlined),
+          title: const Text('Dependency licenses'),
+          subtitle: const Text('Third-party packages retain their own terms'),
+          onTap: () => showLicensePage(
+            context: context,
+            applicationName: 'Movie Box',
+            applicationLegalese: 'Movie Box by R3AP3R Editz',
+          ),
+        ),
+        const Divider(),
+        Text(
+          'Optional donations',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Donations support the creator and do not unlock features or access. '
+          'The external support page is XibeCode-branded and says donor names, '
+          'avatars, amounts, and reviews will be public. Review its current '
+          'notice before donating.',
+        ),
+        const SizedBox(height: 12),
+        const SelectableText(donationUrl),
+        TextButton.icon(
+          icon: const Icon(Icons.copy_outlined),
+          label: const Text('Copy donation link'),
+          onPressed: () async {
+            await Clipboard.setData(const ClipboardData(text: donationUrl));
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Donation link copied.')),
+              );
+            }
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+class BundledNoticeScreen extends StatefulWidget {
+  final String title;
+  final String asset;
+  const BundledNoticeScreen({
+    super.key,
+    required this.title,
+    required this.asset,
+  });
+
+  @override
+  State<BundledNoticeScreen> createState() => _BundledNoticeScreenState();
+}
+
+class _BundledNoticeScreenState extends State<BundledNoticeScreen> {
+  late final Future<String> notice = rootBundle.loadString(widget.asset);
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: Text(widget.title)),
+    body: FutureBuilder<String>(
+      future: notice,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.all(18),
+            child: Text(
+              'This build is missing its notice. '
+              'Get a complete build before redistributing it.',
+            ),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(18),
+          child: SelectableText(snapshot.data!),
+        );
+      },
+    ),
+  );
+}
