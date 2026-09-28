@@ -6,11 +6,11 @@ Security fixes are handled on a best-effort basis on the current `main` branch. 
 
 ## Reporting a vulnerability
 
-Use GitHub's **Report a vulnerability** option under this repository's **Security** tab if private vulnerability reporting is enabled:
+Use GitHub's **Report a vulnerability** option under this repository's **Security** tab to submit a private report:
 
 https://github.com/iotserver24/movie-box/security/advisories/new
 
-This document does not mean the repository setting has already been enabled. A read-only API check on September 28, 2026 returned HTTP 404 while this repository was private; availability remains unverified. If that option is unavailable, open an issue containing only a request for a private reporting channel. Wait for the maintainer to arrange a private channel before sharing technical details. Do not put exploit details, credentials, private data, or sensitive reproduction steps in a public issue.
+Private vulnerability reporting was enabled on September 28, 2026 after source publication. GitHub's API confirmed it is enabled, and the public Security page displays the reporting link. A GitHub account is required to submit a report; no test report was submitted during verification. If the option becomes unavailable, open an issue containing only a request for a private reporting channel and wait for the maintainer to arrange one. Do not put exploit details, credentials, private data, or sensitive reproduction steps in a public issue.
 
 In a private report, provide the affected revision, impact, prerequisites, and minimal reproduction using synthetic data. Redact credentials and avoid including third-party media or signed URLs. Coordinate disclosure with the maintainer; do not access other people's deployments or data to demonstrate an issue.
 

@@ -1,6 +1,6 @@
 # Publication review record
 
-Review date: September 28, 2026. Base commit: `e33ff2b`, with local uncommitted preparation changes. This record distinguishes automated checks from the approvals still needed before making the repository public or distributing binaries.
+Review date: September 28, 2026. The initial review covered base commit `e33ff2b` and the preparation changes subsequently committed as `221d703`. Scan counts below describe that pre-publication baseline. The user explicitly authorized pushing the reviewed source and making the repository public; publication does not establish legal approval or production-release readiness.
 
 ## Automated secret detection
 
@@ -18,7 +18,7 @@ This is not proof that the repository contains no secrets or personal informatio
 - Settings retains the token when changing server addresses and sends it during the connection check. Clear credentials before switching operators; automatic clearing or reconfirmation remains an application-hardening task.
 - The five binary files in the working tree and reachable history are launcher PNGs showing the Flutter logo. Inspection found only an Adobe ImageReady metadata tag and no trailing payload. These are third-party branding, not verified original project artwork; provenance and branding approval remain outstanding.
 - Root Git and Docker ignore rules now exclude signing files and local environment variants while keeping `.env.example` and required notices publishable.
-- Private vulnerability-reporting availability remains unverified: the read-only GitHub API check returned HTTP 404 while the repository was private. Establish and test a confidential reporting route.
+- Private vulnerability reporting was enabled after publication. GitHub's API returned `enabled: true`, and the public Security page displayed **Report a vulnerability**. No report was submitted. Earlier checks while the repository was private returned HTTP 404.
 - A preliminary dependency inventory is recorded in [dependency review](dependency-review.md). It does not cover every transitive/native dependency or container component.
 - The signing fallback and missing app notice UI have been addressed in source. Official Flutter 3.47.5 stable (Dart 3.13.4) passed dependency resolution with the existing lockfile, formatting, static analysis, and all 14 tests. A normal debug APK built; its debug certificate and bundled notices verified. The automatically generated disposable debug key was kept outside the repository and deleted after verification. No production signing credentials were generated or requested.
 - Real Gradle checks rejected missing/incomplete production-signing configuration and a nonexistent keystore path. A Docker image build and isolated health/auth/schema/nonroot/notice smoke checks passed. Test services were stopped and no artifacts were published. Production signing and device behavior remain unverified.
@@ -29,6 +29,10 @@ This is not proof that the repository contains no secrets or personal informatio
 2. Obtain legal review of the custom license and third-party redistribution obligations.
 3. Supply the intended production signing environment securely and complete the [signing checks](signing.md).
 4. Repeat the passing Python, Flutter, debug-build, and container checks against the release commit, and complete Android device tests with authorized media.
-5. Verify the private reporting route and default API policy, then explicitly approve any push, visibility change, or release.
+5. Review the existing default API policy and token-on-host-change behavior before production deployment. A future binary release still requires separate approval.
 
-No GitHub settings, repository visibility, commits, tags, or published artifacts were changed by this preparation work.
+## Publication outcome
+
+The reviewed source was committed as `221d703` and pushed to `main`. On the user's explicit instruction, the repository was changed to **public** and private vulnerability reporting was enabled. The repository and README were verified in a signed-out browser. A final scan of the exact staged source checked 66 text files, skipped the five reviewed PNGs, and left no unresolved credential candidates after structured-checksum classification.
+
+Only source and documentation were published. No release tag, APK, container image, production credential, or running service was published. Legal/ownership confirmation and the remaining release checks above are not claimed as complete.

@@ -6,22 +6,22 @@ This is a checklist for maintainers, not a statement that the project has alread
 
 | Area | Current status and next step |
 | --- | --- |
-| Source documentation | README, component guides, community policies, and a custom source-available license are prepared locally. Review and commit them before publication. |
-| Ownership and license | Creator credit, no advertising, no selling, and optional donations are specified. Preliminary Python and direct Flutter dependency checks are recorded in [dependency review](dependency-review.md); full compatibility, provenance, and legal approval remain outstanding. |
+| Source documentation | README, component guides, community policies, and the custom source-available license were committed and pushed to `main`. |
+| Ownership and license | Creator credit, no advertising, no selling, and optional donations are specified. Preliminary Python and resolved Flutter license-file checks are recorded in [dependency review](dependency-review.md); full compatibility, provenance, and legal approval remain outstanding. |
 | App notices | Settings links to creator credit, bundled custom-license and acknowledgment screens, and Flutter's dependency-license page. All 14 Flutter tests passed, including notice navigation, offline license loading, and donation-link copying. Installed-device and shipped-notice completeness checks remain required. |
 | Service image notices | The Docker image built successfully. Its `/app/LICENSE` and `/app/CREDITS.md` matched the root files, and isolated runtime checks passed. Complete third-party/container notice review remains required before distribution. |
 | Android signing | The debug-signing fallback is removed. Real Gradle checks rejected absent/incomplete production settings and a nonexistent keystore path. A normal debug APK built and its debug signature and bundled notices verified. Production signing, production certificate verification, and device checks remain outstanding; see [signing](signing.md). |
 | Secrets and history | A contextual automated scan of reachable text history and non-ignored working text files left no unresolved credential candidates after checksum/revision classification. Binary, ownership, privacy, and other manual checks remain outstanding; see [publication review](publication-review.md) for scope and exclusions. |
-| Private vulnerability reports | The read-only GitHub API check returned HTTP 404 while the repository was private. Verify a working private channel before public publication. |
+| Private vulnerability reports | Enabled after publication; GitHub's API confirmed the setting and the public Security page displayed the reporting link. No report was submitted. |
 | Donations | The requested URL loads a XibeCode-branded support page with a public-donor notice. Confirm that branding and disclosure are appropriate; see [privacy](privacy.md#donations). |
-| GitHub publication | No commit, push, release, visibility change, or settings update is performed by this preparation work. |
+| GitHub publication | The user explicitly authorized publication. Source commit `221d703` was pushed and the repository made public on September 28, 2026. No binary release or service deployment was published; unresolved legal and release checks remain listed below. |
 
 ### Validation performed for this preparation
 
 - Python 3.12 suites: **9 tests passed** (six API fixture tests and three notice-synchronization tests), with one dependency deprecation warning about AnyIO's `BlockingPortal` alias. Dependencies were installed in an isolated `uv` environment; live socket connections were blocked during tests.
 - Bundled notices match the canonical `LICENSE` and `CREDITS.md` byte for byte. Tree-sitter syntax parsing passed for the changed Dart source, new widget tests, and Kotlin build script; this is not type analysis or build execution.
 - Separate synthetic API checks confirmed unauthenticated health/schema pages, bearer-token rejection and acceptance on `/v1/home`, and the documented header parameter across all protected routes. No provider requests or media downloads were made.
-- Checks passed for 18 Markdown documents, 65 local links/anchors, 21 shell examples, and five YAML files, along with asset registration, funding URL, image-notice configuration, and `git diff --check`. The byte-identical bundled credits asset is displayed as plain text and excluded from root-relative Markdown link checking. Remote links to newly prepared files will not exist on `main` until the files are committed and pushed.
+- Checks passed for 18 Markdown documents, 65 local links/anchors, 21 shell examples, and five YAML files, along with asset registration, funding URL, image-notice configuration, and `git diff --check`. The byte-identical bundled credits asset is displayed as plain text and excluded from root-relative Markdown link checking. The source and documentation are now pushed to `main`, and the public README was verified in a signed-out browser.
 - The donation page was opened and its public notice reviewed; no donation, payment, or form submission was attempted.
 - Using official **Flutter 3.47.5 stable / Dart 3.13.4**, dependency resolution with `--enforce-lockfile`, formatting checks, static analysis, and **all 14 Flutter tests passed** in an isolated copy. The offline license test also passed independently without a previously warmed asset cache. The repository lockfile was preserved.
 - A normal Android debug APK built successfully; its debug signature, debuggable manifest, and bundled notices verified. Real release-build checks rejected missing/incomplete signing settings and a nonexistent keystore path; an isolated Gradle fixture passed 11 expected-outcome cases. See [signing](signing.md) for scope. Production signing and device installation/update behavior remain unverified.
@@ -35,12 +35,12 @@ This is a checklist for maintainers, not a statement that the project has alread
 - [ ] Have the custom license reviewed for the intended credit, no-advertising, and no-selling conditions. Describe the project as source-available, not OSI-approved open source.
 - [ ] Review direct and transitive dependency licenses, including resolved Python dependencies, Android packages, and container contents. Preserve required notices.
 - [ ] Review the default server address in the app. Decide whether to retain it, document its operator policy, or replace it before publication.
-- [ ] Enable private vulnerability reporting on GitHub and verify the reporting route in `SECURITY.md` works.
+- [x] Enable private vulnerability reporting on GitHub and verify the API setting and public reporting link. End-to-end report submission was not tested.
 - [ ] Establish a private conduct-reporting contact and document it if one is available.
 - [ ] Configure repository description, topics, issue settings, and appropriate default-branch protections.
 - [ ] Configure and validate continuous integration for Python tests and Flutter formatting, analysis, and tests, using the documented Flutter 3.47.5 stable SDK. Local passing checks do not establish continuous integration.
 - [ ] Confirm the donation URL in `README.md` and `.github/FUNDING.yml` is the intended destination.
-- [ ] Change repository visibility only after an explicit maintainer decision and review of the consequences for history, forks, and existing contributors.
+- [x] Obtain explicit authorization before changing repository visibility. The user authorized the push and public visibility change; this does not certify the unresolved review items above.
 
 ## Before distributing an app or service release
 

@@ -33,7 +33,7 @@ docker compose up --build -d
 curl http://127.0.0.1:8000/health
 ```
 
-Copy `.env.example` only on first setup so existing configuration is not overwritten. Repository access is required while the repository is private. In another terminal, from the repository root:
+Copy `.env.example` only on first setup so existing configuration is not overwritten. In another terminal, from the repository root:
 
 ```sh
 cd movie_box_app

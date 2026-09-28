@@ -2,7 +2,7 @@ blank_issues_enabled: true
 contact_links:
   - name: Security reporting guidance
     url: https://github.com/iotserver24/movie-box/blob/main/SECURITY.md
-    about: Read the reporting policy before sharing vulnerability details. Private reporting availability is not yet verified.
+    about: Use the private reporting route in the security policy; never post vulnerability details in a public issue.
   - name: License and reuse terms
     url: https://github.com/iotserver24/movie-box/blob/main/docs/licensing.md
     about: Review the required creator credit, no-advertising, no-selling, and optional donation terms.
