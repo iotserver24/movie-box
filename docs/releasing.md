@@ -2,6 +2,38 @@
 
 This is a checklist for maintainers, not a statement that the project has already passed these checks. Adding documentation does not change repository visibility, enable GitHub settings, or publish a release.
 
+## Publish an Android release with GitHub Actions
+
+Open **Actions → Android release → Run workflow**, select `main`, and enter:
+
+- **version**: a new `major.minor.patch` version without `v`, for example `1.0.3`.
+- **build_number**: an Android version code higher than all previous releases and the source `pubspec.yaml` build number, for example `4` for the first release.
+
+The version must also be newer than the source version and previous published versions. The workflow builds exactly the selected commit, overriding the APK version without editing `pubspec.yaml`. It only runs release jobs from `main`. Runs are serialized, and existing tags/releases are never overwritten.
+
+Configure these repository Actions secrets once under **Settings → Secrets and variables → Actions**:
+
+- `MOVIE_BOX_KEYSTORE_BASE64`: base64-encoded production keystore.
+- `MOVIE_BOX_STORE_PASSWORD`: keystore password.
+- `MOVIE_BOX_KEY_ALIAS`: signing key alias.
+- `MOVIE_BOX_KEY_PASSWORD`: signing key password.
+
+Keep the same key for subsequent releases and maintain a secure offline backup. See [signing](signing.md). Secrets are only exposed to the signing step; the temporary keystore is deleted, and neither it nor Gradle caches are uploaded.
+
+The workflow checks bundled notices, release-validation tests, Flutter analysis, and Flutter tests using Flutter 3.47.1. It builds a universal release APK, verifies its signature against the supplied keystore certificate, checks the APK version and non-debuggable status, then publishes a GitHub release containing:
+
+- `MovieBox-<version>.apk`
+- `SHA256SUMS`
+- `signing-certificate.txt` (public certificate details, not the private key)
+
+The release tag points to the exact workflow commit. A draft is created with all assets before publication. If publication fails after draft creation, inspect the draft and run logs before deleting that draft and retrying; remove a tag only if it belongs to that failed, unpublished attempt. Never replace an already published APK/tag. Failed checks or builds publish nothing. Device installation, update compatibility, and the checklist below remain maintainer responsibilities.
+
+The same workflow can be started from the terminal:
+
+```sh
+gh workflow run android-release.yml --ref main -f version=1.0.3 -f build_number=4
+```
+
 ## Preparation status — September 28, 2026
 
 | Area | Current status and next step |
