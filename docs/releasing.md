@@ -53,7 +53,15 @@ Android downloads continue in the background with progress notifications. The pe
 - Background downloads of a generated 27,874,559-byte test video matched the source SHA-256 exactly. Saved-video playback and subtitles worked with the fixture server disconnected. Phone and wide download controls were inspected.
 - The companion website passed lint/build checks and browser interaction checks at desktop and mobile sizes before publication. Release links must additionally be checked against the published APK.
 - No single-file speed multiplier was established. Native workers allow independent videos and subtitles to transfer concurrently; unsafe multi-part splitting is not enabled. Source-server and network limits still apply.
-- Manufacturer-specific battery restrictions, every Android version, and Android TV hardware were not exhaustively tested. Signing and previous-release upgrade checks belong to the final artifact verification, not the debug checks above.
+- Manufacturer-specific battery restrictions, every Android version, and Android TV hardware were not exhaustively tested.
+
+### Published artifact verification
+
+- [MovieBox v1.0.4, build 5](https://github.com/iotserver24/movie-box/releases/tag/v1.0.4) was published from commit `a0224d4c2506e1cb393d29cb9967f1ef6e97d91d` by successful [release run 36965575905](https://github.com/iotserver24/movie-box/actions/runs/36965575905).
+- The downloaded `MovieBox-1.0.4.apk` matched `SHA256SUMS`: `1b3335c41b67c2de62c3fd2cc103c42f65c5c2d11d7990089b4d862aa2e84492`. Independent Android build-tools verification confirmed version `1.0.4`, version code `5`, a non-debuggable APK, and the same production certificate as v1.0.3.
+- An in-place emulator upgrade from the published v1.0.3 APK preserved the configured fixture server, bookmarks, watch history, saved video, and saved subtitles. The old saved video played after the upgrade with the server disconnected. The published v1.0.4 APK also completed a new download through a real foreground data-sync service with the display asleep; that new saved video and its subtitles played with the server disconnected.
+- Additional native checks confirmed notification cancellation remained cancelled after app restart and a server ignoring range requests produced a complete, checksum-matched video.
+- Browser clicks on both prepared website download buttons delivered the exact published APK checksum before the website update was pushed. Website commit `74768a7b8fcc9196fa9e123ef2352776546bfa9b` deployed successfully. The live [MovieBox page](https://anisurge.lol/movie) passed navigation, FAQ, carousel, overflow, and browser-error checks at 1440×1000, 412×839, and 320×740. Both live download buttons delivered the checksum-verified APK; release, source, and donation links also worked.
 
 ## Preparation status — September 28, 2026
 
