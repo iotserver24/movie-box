@@ -142,7 +142,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> attach(VideoPlayerController next, {Duration? at}) async {
+  Future<void> attach(
+    VideoPlayerController next, {
+    Duration? at,
+    bool play = true,
+  }) async {
     try {
       await next.initialize();
       if (!mounted) {
@@ -170,7 +174,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         previous.removeListener(onProgress);
         await previous.dispose();
       }
-      await next.play();
+      if (play) await next.play();
       revealControls();
       if (mounted) setState(() {});
     } catch (_) {
@@ -187,6 +191,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         httpHeaders: stream.headers,
       ),
       at: position,
+      play: !resume || (controller?.value.isPlaying ?? true),
     );
     selected = stream;
     captions = [];
@@ -462,11 +467,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         season,
         episode,
       );
-      playback = fresh;
       final stream = fresh.streams.firstWhere(
         (s) => s.format == choice.format && s.resolution == choice.resolution,
       );
       await selectStream(stream);
+      playback = fresh;
       if (mounted) {
         setState(() {
           currentOffline = null;
@@ -1429,6 +1434,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 label: Text(captionLabel),
                               ),
                             ],
+                          ),
+                        ),
+                      if (currentOffline?.subtitlePath != null &&
+                          player != null &&
+                          player.value.isInitialized)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: chooseCaption,
+                              icon: const Icon(Icons.closed_caption_outlined),
+                              label: Text(captionLabel),
+                            ),
                           ),
                         ),
                       Padding(
