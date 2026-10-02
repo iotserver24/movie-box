@@ -18,7 +18,7 @@ flutter pub get
 flutter run
 ```
 
-The default API address is `https://movie-box.n92dev.us.kg`. Settings can override it for another deployment, including `http://10.0.2.2:8000` for a locally running scraper on the standard Android emulator. If the server requires `SCRAPER_API_TOKEN`, enter the token in Settings. Keep any local HTTP deployment on a trusted network or private VPN; use HTTPS for a public hostname.
+The default API address is `https://movie-box.n92dev.us.kg`. Settings can override it for another deployment, including `http://10.0.2.2:8000` for a locally running scraper on the standard Android emulator. The address field never displays the saved/default address; leave it blank to keep the current server, or enter a replacement. A successfully saved replacement is hidden again. If the server requires `SCRAPER_API_TOKEN`, enter the token in Settings. Keep any local HTTP deployment on a trusted network or private VPN; use HTTPS for a public hostname.
 
 ## Features
 
@@ -41,7 +41,7 @@ flutter build apk --debug
 
 ## Credits, privacy, and license
 
-Created by **[R3AP3R Editz](https://github.com/iotserver24)**. Open **Settings → Credits and licenses** for creator attribution, the full custom license and project acknowledgments bundled for offline reading, and Flutter's dependency-license page. The optional donation address can be copied without contacting a website. See the [project README](../README.md), [privacy notes](../docs/privacy.md), and [credits](../CREDITS.md).
+Created by **[R3AP3R Editz](https://github.com/iotserver24)**. Open **Settings → Credits and licenses** for creator attribution, the full custom license and project acknowledgments bundled for offline reading, and Flutter's dependency-license page. The Donate button in Settings and Credits opens the optional support page in an external browser. If no browser is available, it offers a copy-link fallback; Credits also keeps its copy-only action. See the [project README](../README.md), [privacy notes](../docs/privacy.md), and [credits](../CREDITS.md).
 
 Run `python3 scripts/sync_notices.py --check` from the repository root before building. If the canonical root notices changed, run the same command without `--check` and include the updated bundled assets. Formatting, static analysis, and all 14 Flutter tests passed with Flutter 3.47.5 stable (Dart 3.13.4), including notice access and synchronization. This does not replace Android build, signing, or installed-device checks; see the release checklist.
 

@@ -1610,7 +1610,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final address = TextEditingController(text: widget.library.server);
+  final address = TextEditingController();
   late final token = TextEditingController(text: widget.library.token);
   bool testing = false;
   bool saving = false;
@@ -1623,7 +1623,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> save() async {
     if (testing) return;
-    final raw = address.text.trim();
+    final enteredAddress = address.text.trim();
+    final raw = enteredAddress.isEmpty ? widget.library.server : enteredAddress;
     final accessToken = token.text.trim();
     final uri = Uri.tryParse(raw);
     if (uri == null ||
@@ -1643,6 +1644,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => saving = true);
       await widget.library.configure(raw, accessToken);
       if (!mounted) return;
+      address.clear();
       widget.onSaved();
       if (mounted) {
         if (widget.standalone) {
@@ -1685,7 +1687,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: 12),
         const Text(
-          'The default server is the hosted MovieBox API. You can enter another HTTPS API URL here, or 10.0.2.2 for a locally running Android emulator.',
+          'Your server address is hidden. Leave this field blank to keep your current connection, or enter a new address to change it.',
         ),
         const SizedBox(height: 22),
         TextField(
@@ -1694,7 +1696,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           keyboardType: TextInputType.url,
           decoration: const InputDecoration(
             labelText: 'API address',
-            hintText: 'https://movie-box.n92dev.us.kg',
+            hintText: 'Enter a new server address',
           ),
         ),
         const SizedBox(height: 16),
@@ -1721,6 +1723,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Use this app and server only on a trusted network or private VPN.',
         ),
         const Divider(height: 32),
+        const DonateButton(),
+        const SizedBox(height: 10),
+        const Text(
+          'Donations are optional and do not unlock features. Opens an external support page; review its public donor notice before donating.',
+        ),
+        const SizedBox(height: 12),
         ListTile(
           leading: const Icon(Icons.info_outline),
           title: const Text('Credits and licenses'),

@@ -545,7 +545,12 @@ void main() {
         await _flush(tester);
         _expectLoader(tester, 'Connecting', compact: true);
         expect(
-          tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+          tester.widget<FilledButton>(
+            find.ancestor(
+              of: find.byType(MovieBoxLoader),
+              matching: find.byType(FilledButton),
+            ),
+          ).onPressed,
           isNull,
         );
         expect(

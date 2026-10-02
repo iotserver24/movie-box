@@ -29,7 +29,7 @@ Before posting diagnostic information, remove tokens, personal IP addresses, loc
 
 The optional donation link opens the creator's XibeCode-branded support page at [ai.xibebase.in](https://ai.xibebase.in), rather than a Movie Box checkout. As checked on September 28, 2026, the page says the donor's name, avatar, amount, and review will be publicly listed, while email stays private. It identifies Razorpay as its payment provider. Review the current notice and terms before submitting personal or payment information; these are the site's statements, not an independent privacy audit.
 
-The app's **Credits and licenses** screen displays the donation address and provides a copy button. Copying writes that public URL to the device clipboard; it does not open the site or send data to it. License and acknowledgment screens read bundled assets and need no server connection.
+The app's Settings and **Credits and licenses** screens include a Donate button that opens this external site in the device browser only when tapped. Credits also displays the donation address and provides a copy button; a failed browser launch offers the same copy action. Copying writes that public URL to the device clipboard; it does not open the site or send data to it. License and acknowledgment screens read bundled assets and need no server connection.
 
 This repository does not process donations itself. Donations are optional and must not provide exclusive features, access, or advertising in return. The external page's description of XibeCode as open source does not change Movie Box's custom source-available license.
 

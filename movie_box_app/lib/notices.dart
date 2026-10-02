@@ -1,8 +1,57 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const projectUrl = 'https://github.com/iotserver24/movie-box';
 const donationUrl = 'https://ai.xibebase.in';
+
+class DonateButton extends StatefulWidget {
+  const DonateButton({super.key});
+
+  @override
+  State<DonateButton> createState() => _DonateButtonState();
+}
+
+class _DonateButtonState extends State<DonateButton> {
+  bool opening = false;
+
+  Future<void> donate() async {
+    if (opening) return;
+    setState(() => opening = true);
+    try {
+      final opened = await launchUrl(
+        Uri.parse(donationUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) throw StateError('No browser available');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Could not open a browser. Copy the donation link instead.',
+            ),
+            action: SnackBarAction(
+              label: 'Copy link',
+              onPressed: () async {
+                await Clipboard.setData(const ClipboardData(text: donationUrl));
+              },
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => opening = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FilledButton.tonalIcon(
+    onPressed: opening ? null : donate,
+    icon: const Icon(Icons.favorite_outline),
+    label: Text(opening ? 'Opening donation page' : 'Donate'),
+  );
+}
 
 class CreditsScreen extends StatelessWidget {
   const CreditsScreen({super.key});
@@ -75,6 +124,8 @@ class CreditsScreen extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         const SelectableText(donationUrl),
+        const SizedBox(height: 12),
+        const DonateButton(),
         TextButton.icon(
           icon: const Icon(Icons.copy_outlined),
           label: const Text('Copy donation link'),
