@@ -15,6 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher_platform_interface/link.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
+import 'downloads_test.dart' show FakeDownloadBackend;
+
 class _Launcher extends UrlLauncherPlatform {
   final calls = <String>[];
   LaunchOptions? options;
@@ -44,7 +46,10 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    library = MovieLibrary(await SharedPreferences.getInstance());
+    library = MovieLibrary(
+      await SharedPreferences.getInstance(),
+      downloadBackend: FakeDownloadBackend(),
+    );
     requests = [];
     client = MockClient((request) async {
       requests.add(request);

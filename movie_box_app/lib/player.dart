@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 
 import 'api.dart';
+import 'download_controls.dart';
 import 'library.dart';
 import 'loading.dart';
 import 'model.dart';
@@ -62,12 +63,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int lastRendered = -1;
   late int season = widget.title.kind == 'movie' ? 0 : widget.season;
   late int episode = widget.title.kind == 'movie' ? 0 : widget.episode;
-  final downloadTask = DownloadTask();
+  bool preparingDownload = false;
+  DownloadTask get downloadTask =>
+      widget.library.taskFor(widget.title, season, episode);
+
+  void refreshDownloads() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
     currentOffline = widget.offline;
+    widget.library.addListener(refreshDownloads);
     widget.api
         .detail(widget.title.path)
         .then((value) {
@@ -274,7 +282,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> changeEpisode(int newSeason, int newEpisode) async {
     if (loading ||
-        downloadTask.active ||
+        preparingDownload ||
         (season == newSeason && episode == newEpisode)) {
       return;
     }
@@ -492,11 +500,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> downloadCurrent() async {
     if (loading ||
+        preparingDownload ||
         actionLoading != null ||
         currentOffline != null ||
         downloadTask.active) {
       return;
     }
+    setState(() => preparingDownload = true);
     try {
       final fresh = await withLoading(
         'Getting download options',
@@ -576,50 +586,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         stream,
         option == false ? null : option as MovieCaption,
       );
-      if (saved != null && mounted) {
-        final position = controller?.value.position;
-        var switched = false;
-        try {
-          await attach(
-            VideoPlayerController.file(File(saved.path)),
-            at: position,
-          );
-          if (saved.subtitlePath != null) {
-            final text = await File(saved.subtitlePath!).readAsString();
-            await controller!.setClosedCaptionFile(
-              Future.value(SrtCaptions(text)),
-            );
-          }
-          switched = true;
-          if (mounted) {
-            setState(() {
-              currentOffline = saved;
-              selected = null;
-              captionLabel = saved.subtitlePath == null
-                  ? 'Off'
-                  : 'Saved subtitles';
-            });
-          }
-        } catch (_) {}
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                !switched
-                    ? 'Saved. Open it from Downloads to play offline.'
-                    : saved.subtitlePath == null
-                    ? 'Video saved for offline viewing.'
-                    : 'Video and subtitles saved for offline viewing.',
-              ),
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              saved == null
+                  ? 'Download started in the background. Open Downloads to track it or play offline when ready.'
+                  : 'Already downloaded. Open Downloads to play offline.',
             ),
-          );
-        }
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('$e')));
       }
+    } finally {
+      if (mounted) setState(() => preparingDownload = false);
     }
   }
 
@@ -1256,15 +1240,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       children: [
                                         Expanded(
                                           child: LinearProgressIndicator(
-                                            value: downloadTask.total == null
-                                                ? null
-                                                : downloadTask.received /
-                                                      downloadTask.total!,
+                                            value:
+                                                (downloadTask.total ?? 0) <= 0
+                                                ? (downloadTask.paused
+                                                      ? 0
+                                                      : null)
+                                                : (downloadTask.received /
+                                                          downloadTask.total!)
+                                                      .clamp(0.0, 1.0),
                                           ),
                                         ),
                                         TextButton(
-                                          onPressed: downloadTask.cancel,
-                                          child: const Text('Pause download'),
+                                          onPressed: () async {
+                                            try {
+                                              if (downloadTask.paused) {
+                                                await downloadTask.resume();
+                                              } else {
+                                                await downloadTask.pause();
+                                              }
+                                            } catch (error) {
+                                              if (!context.mounted) return;
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text('$error'),
+                                                    ),
+                                                  );
+                                            }
+                                          },
+                                          child: Text(
+                                            downloadTask.paused
+                                                ? 'Resume download'
+                                                : 'Pause download',
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -1298,7 +1306,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     savePosition();
     controller?.removeListener(onProgress);
     controller?.dispose();
-    downloadTask.dispose();
+    widget.library.removeListener(refreshDownloads);
     super.dispose();
   }
 
@@ -1386,32 +1394,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ],
                         ),
                       ),
-                      AnimatedBuilder(
-                        animation: downloadTask,
-                        builder: (_, _) => downloadTask.active
-                            ? Padding(
-                                padding: const EdgeInsets.all(18),
-                                child: Column(
-                                  children: [
-                                    LinearProgressIndicator(
-                                      value: downloadTask.total == null
-                                          ? null
-                                          : downloadTask.received /
-                                                downloadTask.total!,
-                                    ),
-                                    Text(
-                                      downloadTask.total == null
-                                          ? '${(downloadTask.received / 1048576).toStringAsFixed(1)} MB'
-                                          : '${(downloadTask.received / 1048576).toStringAsFixed(1)} / ${(downloadTask.total! / 1048576).toStringAsFixed(1)} MB',
-                                    ),
-                                    TextButton(
-                                      onPressed: downloadTask.cancel,
-                                      child: const Text('Pause download'),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : const SizedBox.shrink(),
+                      Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: DownloadControls(task: downloadTask),
                       ),
                       if (currentOffline == null &&
                           player != null &&

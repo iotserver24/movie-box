@@ -2,14 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:movie_box_app/api.dart';
 import 'package:movie_box_app/library.dart';
 import 'package:movie_box_app/model.dart';
 import 'package:movie_box_app/screens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-class _LocalHttpOverrides extends HttpOverrides {}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +53,25 @@ void main() {
     messenger.setMockMethodCallHandler(mediaChannel, null);
     expect(await extractThumbnail('/missing.mp4'), isNull);
   });
+
+  test(
+    'Thumbnail extraction never starts while the app is backgrounded',
+    () async {
+      var calls = 0;
+      messenger.setMockMethodCallHandler(mediaChannel, (_) async {
+        calls++;
+        return null;
+      });
+      final binding = TestWidgetsFlutterBinding.ensureInitialized();
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      try {
+        expect(await extractThumbnail('/video.mp4'), isNull);
+        expect(calls, 0);
+      } finally {
+        binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      }
+    },
+  );
 
   test('Backfill creates and persists a missing thumbnail once', () async {
     final video = await File('${directory.path}/video.mp4')
@@ -140,6 +157,40 @@ void main() {
     },
   );
 
+  test(
+    'Thumbnail backfill preserves captions finalized during extraction',
+    () async {
+      final video = await File('${directory.path}/video.mp4').writeAsBytes([1]);
+      final preview = await File('${video.path}.preview.jpg').writeAsBytes([2]);
+      final started = Completer<void>();
+      final extracted = Completer<String>();
+      messenger.setMockMethodCallHandler(mediaChannel, (_) {
+        started.complete();
+        return extracted.future;
+      });
+      await library.addDownload(
+        SavedDownload(title, 1, 1, '360', video.path, null),
+      );
+      final pending = library.backfillThumbnails();
+      await started.future;
+      await library.addDownload(
+        SavedDownload(
+          title,
+          1,
+          1,
+          '360',
+          video.path,
+          '${video.path}.srt',
+          thumbnailPath: preview.path,
+        ),
+      );
+      extracted.complete(preview.path);
+      await pending;
+      expect(library.downloads.values.single.subtitlePath, '${video.path}.srt');
+      expect(await preview.exists(), isTrue);
+    },
+  );
+
   test('Continue Watching groups each series and survives restart', () async {
     await library.record(WatchEntry(title, 1, 1, 30, 300));
     await library.record(WatchEntry(title, 1, 2, 40, 300));
@@ -151,53 +202,4 @@ void main() {
     expect(latest.single.positionSeconds, 50);
     expect(restored.history, hasLength(2));
   });
-
-  for (final supportsRange in [true, false]) {
-    test(
-      'Download resume handles ${supportsRange ? '206 partial content' : '200 full response'} without duplicate bytes',
-      () async {
-        final bytes = List<int>.generate(1024, (i) => i % 256);
-        final partial = await File(
-          '${directory.path}/${title.path}-1-1-360.mp4.part',
-        ).writeAsBytes(bytes.take(200).toList());
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        addTearDown(() => server.close(force: true));
-        final ranges = <String?>[];
-        server.listen((request) async {
-          ranges.add(request.headers.value('range'));
-          final body = supportsRange ? bytes.sublist(200) : bytes;
-          request.response.statusCode = supportsRange ? 206 : 200;
-          request.response.contentLength = body.length;
-          if (supportsRange) {
-            request.response.headers.set(
-              'Content-Range',
-              'bytes 200-1023/1024',
-            );
-          }
-          request.response.add(body);
-          await request.response.close();
-        });
-        final api = MovieApi(baseUrl: 'http://127.0.0.1:${server.port}');
-        addTearDown(api.close);
-        final stream = MovieStream.fromJson({
-          'id': '360',
-          'format': 'MP4',
-          'resolutions': '360',
-          'url': 'http://127.0.0.1:${server.port}/video',
-        });
-        final task = DownloadTask();
-        addTearDown(task.dispose);
-        final saved = await HttpOverrides.runWithHttpOverrides(
-          () => task.start(api, library, title, 1, 1, stream, null),
-          _LocalHttpOverrides(),
-        );
-        expect(saved, isNotNull);
-        expect(await File(saved!.path).readAsBytes(), bytes);
-        expect(await partial.exists(), isFalse);
-        expect(ranges, ['bytes=200-']);
-        expect(task.active, isFalse);
-        expect(library.downloads, hasLength(1));
-      },
-    );
-  }
 }

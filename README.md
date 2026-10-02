@@ -14,12 +14,12 @@ Browse and search titles, resume watching, save bookmarks, and download media fo
 - Video playback with available quality and subtitle choices.
 - Continue Watching with saved episode and playback position.
 - A bookmarked-title library and offline playback of saved downloads.
-- Download progress and partial-file resume on retry.
+- Android background downloads with progress notifications and a persistent queue in Downloads, with pause, resume, cancel, and retry controls. Allow MovieBox notifications to start, resume, or retry downloads. Pause/resume depends on server support; unknown-length sources require another quality.
 - A configurable API address and optional bearer-token authentication.
 - A Docker Compose deployment bound to localhost by default.
 - Offline creator-credit and project-license screens, plus dependency notices in Settings.
 
-**Current scope:** Android is the checked-in application target. Downloads run only while the app remains open. Upstream catalog availability, signed links, subtitle availability, and quality restrictions can change; this project does not bypass locked content.
+**Current scope:** Android is the checked-in application target. In v1.0.4 (build 5), downloads continue in the background; Android force-stop and battery restrictions can still interrupt them. Reopen MovieBox to recover the persistent queue and resume or retry interrupted items in Downloads. Upstream catalog availability, signed links, subtitle availability, and quality restrictions can change; this project does not bypass locked content.
 
 ## Quick start
 

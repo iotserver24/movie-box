@@ -21,12 +21,48 @@ class MovieBoxApp extends StatefulWidget {
   State<MovieBoxApp> createState() => _MovieBoxAppState();
 }
 
-class _MovieBoxAppState extends State<MovieBoxApp> {
+class _MovieBoxAppState extends State<MovieBoxApp> with WidgetsBindingObserver {
   late MovieApi api = MovieApi(
     baseUrl: widget.library.server,
     token: widget.library.token,
   );
   int tab = 0;
+  final messengerKey = GlobalKey<ScaffoldMessengerState>();
+
+  Future<void> restoreDownloads() async {
+    try {
+      await widget.library.initializeDownloads();
+    } catch (error) {
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        messengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text('Could not restore downloads: $error'),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => unawaited(restoreDownloads()),
+            ),
+          ),
+        );
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(restoreDownloads());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(restoreDownloads());
+      unawaited(widget.library.backfillThumbnails());
+    }
+  }
 
   void updated() {
     api.close();
@@ -40,6 +76,7 @@ class _MovieBoxAppState extends State<MovieBoxApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     api.close();
     super.dispose();
   }
@@ -50,6 +87,7 @@ class _MovieBoxAppState extends State<MovieBoxApp> {
     const surface = Color(0xFF1D2529);
     const accent = Color(0xFFF2B86B);
     return MaterialApp(
+      scaffoldMessengerKey: messengerKey,
       title: 'MovieBox',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

@@ -12,6 +12,8 @@ import 'package:movie_box_app/model.dart';
 import 'package:movie_box_app/player.dart';
 import 'package:movie_box_app/screens.dart';
 
+import 'downloads_test.dart' show FakeDownloadBackend;
+
 void main() {
   test('API sends token, search page and episode parameters', () async {
     final seen = <Uri>[];
@@ -404,7 +406,10 @@ void main() {
 
   testWidgets('Wide TV layout navigates all five destinations', (tester) async {
     SharedPreferences.setMockInitialValues({});
-    final library = MovieLibrary(await SharedPreferences.getInstance());
+    final library = MovieLibrary(
+      await SharedPreferences.getInstance(),
+      downloadBackend: FakeDownloadBackend(),
+    );
     await tester.binding.setSurfaceSize(const Size(1280, 720));
     tester.view.physicalSize = const Size(1280, 720);
     tester.view.devicePixelRatio = 1;

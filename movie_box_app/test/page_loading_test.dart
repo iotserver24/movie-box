@@ -12,6 +12,8 @@ import 'package:movie_box_app/main.dart';
 import 'package:movie_box_app/screens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'downloads_test.dart' show FakeDownloadBackend;
+
 class _Responses {
   final requests = <http.Request>[];
   final pending = <Completer<http.Response>>[];
@@ -92,7 +94,10 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    library = MovieLibrary(await SharedPreferences.getInstance());
+    library = MovieLibrary(
+      await SharedPreferences.getInstance(),
+      downloadBackend: FakeDownloadBackend(),
+    );
     responses = _Responses();
   });
 
@@ -545,12 +550,14 @@ void main() {
         await _flush(tester);
         _expectLoader(tester, 'Connecting', compact: true);
         expect(
-          tester.widget<FilledButton>(
-            find.ancestor(
-              of: find.byType(MovieBoxLoader),
-              matching: find.byType(FilledButton),
-            ),
-          ).onPressed,
+          tester
+              .widget<FilledButton>(
+                find.ancestor(
+                  of: find.byType(MovieBoxLoader),
+                  matching: find.byType(FilledButton),
+                ),
+              )
+              .onPressed,
           isNull,
         );
         expect(

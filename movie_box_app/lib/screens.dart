@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'download_controls.dart';
 import 'library.dart';
 import 'loading.dart';
 import 'model.dart';
@@ -995,12 +996,15 @@ class _DetailScreenState extends State<DetailScreen> {
   int season = 0, episode = 0;
   bool busy = false;
   String? downloadLabel;
-  final task = DownloadTask();
-
   @override
   void initState() {
     super.initState();
+    widget.library.addListener(refreshDownloads);
     future = loadDetail();
+  }
+
+  void refreshDownloads() {
+    if (mounted) setState(() {});
   }
 
   Future<MovieDetail> loadDetail() async {
@@ -1019,7 +1023,7 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   void dispose() {
-    task.dispose();
+    widget.library.removeListener(refreshDownloads);
     super.dispose();
   }
 
@@ -1044,12 +1048,24 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> download(MovieTitle title) async {
     if (busy) return;
+    final requestedSeason = season;
+    final requestedEpisode = episode;
+    final task = widget.library.taskFor(
+      title,
+      requestedSeason,
+      requestedEpisode,
+    );
+    if (task.active) return;
     setState(() {
       busy = true;
       downloadLabel = 'Getting download options';
     });
     try {
-      final playback = await widget.api.playback(title.path, season, episode);
+      final playback = await widget.api.playback(
+        title.path,
+        requestedSeason,
+        requestedEpisode,
+      );
       if (!mounted) return;
       final choices = playback.streams
           .where((s) => s.format.toUpperCase() == 'MP4' && !s.locked)
@@ -1086,8 +1102,8 @@ class _DetailScreenState extends State<DetailScreen> {
         final options = await widget.api.captions(
           title.path,
           selected.id,
-          season,
-          episode,
+          requestedSeason,
+          requestedEpisode,
         );
         for (final option in options) {
           if (option.language.toLowerCase().startsWith('en')) {
@@ -1102,15 +1118,20 @@ class _DetailScreenState extends State<DetailScreen> {
         widget.api,
         widget.library,
         title,
-        season,
-        episode,
+        requestedSeason,
+        requestedEpisode,
         selected,
         caption,
       );
-      if (mounted && saved != null) {
-        setState(() {});
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved for offline viewing.')),
+          SnackBar(
+            content: Text(
+              saved == null
+                  ? 'Download started. You can leave this screen; manage it in Downloads.'
+                  : 'Already downloaded. To change quality, delete the saved copy from Downloads first.',
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -1150,6 +1171,7 @@ class _DetailScreenState extends State<DetailScreen> {
           }
           final detail = snapshot.data!;
           final title = detail.title;
+          final task = widget.library.taskFor(title, season, episode);
           final watch =
               widget.library.history[viewingKey(title.path, season, episode)];
           final saved =
@@ -1281,6 +1303,7 @@ class _DetailScreenState extends State<DetailScreen> {
                       child: OutlinedButton.icon(
                         onPressed:
                             busy ||
+                                task.active ||
                                 !title.available ||
                                 (detail.seasons.isNotEmpty && episode == 0)
                             ? null
@@ -1302,33 +1325,7 @@ class _DetailScreenState extends State<DetailScreen> {
                         icon: const Icon(Icons.offline_pin),
                         label: Text('Play downloaded ${saved.resolution}p'),
                       ),
-                    AnimatedBuilder(
-                      animation: task,
-                      builder: (_, _) => task.active
-                          ? Column(
-                              children: [
-                                if (task.total == null || task.total! <= 0)
-                                  const MovieBoxLoader(
-                                    label: 'Downloading video',
-                                    compact: true,
-                                  )
-                                else
-                                  LinearProgressIndicator(
-                                    value: task.received / task.total!,
-                                  ),
-                                Text(
-                                  task.total == null
-                                      ? '${(task.received / 1048576).toStringAsFixed(1)} MB'
-                                      : '${(task.received / 1048576).toStringAsFixed(1)} / ${(task.total! / 1048576).toStringAsFixed(1)} MB',
-                                ),
-                                TextButton(
-                                  onPressed: task.cancel,
-                                  child: const Text('Pause download'),
-                                ),
-                              ],
-                            )
-                          : const SizedBox.shrink(),
-                    ),
+                    DownloadControls(task: task),
                     if (detail.dubs.isNotEmpty) ...[
                       const SizedBox(height: 18),
                       const Text(
@@ -1412,6 +1409,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return ListView(
       children: [
         const ScreenHeader('Downloads'),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(18, 8, 18, 12),
+          child: Text(
+            'Downloads continue in the background. Android notifications show progress. '
+            'If your device stops a transfer, reopen MovieBox to recover it.',
+          ),
+        ),
+        for (final task in widget.library.downloadTasks.values)
+          if (!task.complete &&
+              !task.cancelled &&
+              (task.active || task.error != null))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${task.title.title}${task.season > 0 ? ' · S${task.season} E${task.episode}' : ''}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DownloadControls(task: task),
+                ],
+              ),
+            ),
         const Padding(
           padding: EdgeInsets.fromLTRB(18, 8, 18, 4),
           child: Text(

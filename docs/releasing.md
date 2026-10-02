@@ -6,8 +6,8 @@ This is a checklist for maintainers, not a statement that the project has alread
 
 Open **Actions → Android release → Run workflow**, select `main`, and enter:
 
-- **version**: a new `major.minor.patch` version without `v`, for example `1.0.3`.
-- **build_number**: an Android version code higher than all previous releases and the source `pubspec.yaml` build number, for example `4` for the first release.
+- **version**: a new `major.minor.patch` version without `v`, for example `1.0.4`.
+- **build_number**: an Android version code higher than all previous releases and the source `pubspec.yaml` build number, for example `5` for v1.0.4.
 
 The version must also be newer than the source version and previous published versions. The workflow builds exactly the selected commit, overriding the APK version without editing `pubspec.yaml`. It only runs release jobs from `main`. Runs are serialized, and existing tags/releases are never overwritten.
 
@@ -31,8 +31,29 @@ The release tag points to the exact workflow commit. A draft is created with all
 The same workflow can be started from the terminal:
 
 ```sh
-gh workflow run android-release.yml --ref main -f version=1.0.3 -f build_number=4
+gh workflow run android-release.yml --ref main -f version=1.0.4 -f build_number=5
 ```
+
+### v1.0.4 (build 5): background downloads
+
+Android downloads continue in the background with progress notifications. The persistent queue in **Downloads** provides pause, resume, cancel, and retry controls. Android force-stop and battery restrictions can interrupt downloads; reopen MovieBox to recover the queue and resume or retry interrupted items. Allow MovieBox notifications to start, resume, or retry downloads. Pause/resume depends on server support and link availability. Unknown-length sources are rejected; choose another quality. Do not advertise a speed increase or parallel-download multiplier without separate validation.
+
+- [ ] Verify progress notifications and queue controls on a supported Android device, including leaving the download page, backgrounding the app, and screen-off operation.
+- [ ] Verify that denied notification permission blocks start/resume/retry with actionable Android Settings guidance, and that granting permission permits another attempt.
+- [ ] Verify server-dependent pause/resume and exact response-length validation before enqueueing, including rejection of genuinely unknown-length sources with a choose-another-quality message.
+- [ ] Verify queue recovery after process interruption, Android force-stop, and battery restrictions; distinguish recovery after reopening from uninterrupted background execution.
+- [ ] Confirm signed-link recovery, partial-file handling, completed offline playback, and update compatibility with the previous signed release.
+- [ ] Publish and verify `https://github.com/iotserver24/movie-box/releases/tag/v1.0.4` and its `MovieBox-1.0.4.apk` asset before pushing or deploying the prepared website update. The expected APK URL is `https://github.com/iotserver24/movie-box/releases/download/v1.0.4/MovieBox-1.0.4.apk`; HTTP 404 is expected while publication is pending, not a passed artifact check.
+
+### Validation recorded on October 2, 2026
+
+- Flutter static analysis passed and all **173 Flutter tests** passed. Coverage includes shared download controls, independent concurrent episode transfers, cancellation races, persistent queue recovery, denied notification permission, bounded signed-link refresh, exact-size metadata checks, and truncated-file rejection.
+- All **19 release/notices Python tests**, notice synchronization, workflow lint, and whitespace checks passed. A debug APK built and ran on an isolated Android 15 (API 35) emulator.
+- Native checks verified a real foreground data-sync service and progress notification, permission denial followed by successful retry after granting permission, player-origin downloads, notification pause reflected in the player, pause/resume across app recreation, and recovery after force-stop. A recovered transfer completed with the display asleep.
+- Background downloads of a generated 27,874,559-byte test video matched the source SHA-256 exactly. Saved-video playback and subtitles worked with the fixture server disconnected. Phone and wide download controls were inspected.
+- The companion website passed lint/build checks and browser interaction checks at desktop and mobile sizes before publication. Release links must additionally be checked against the published APK.
+- No single-file speed multiplier was established. Native workers allow independent videos and subtitles to transfer concurrently; unsafe multi-part splitting is not enabled. Source-server and network limits still apply.
+- Manufacturer-specific battery restrictions, every Android version, and Android TV hardware were not exhaustively tested. Signing and previous-release upgrade checks belong to the final artifact verification, not the debug checks above.
 
 ## Preparation status — September 28, 2026
 
@@ -77,7 +98,7 @@ gh workflow run android-release.yml --ref main -f version=1.0.3 -f build_number=
 ## Before distributing an app or service release
 
 - [ ] Run Python tests and Flutter checks described in `CONTRIBUTING.md`, and record results against the release commit.
-- [ ] Test installation, server configuration, authentication, playback, subtitle selection, foreground download retry, offline playback, and saved progress on a supported Android device with media you are authorized to use.
+- [ ] Test installation, server configuration, authentication, playback, subtitle selection, background download notifications, persistent queue pause/resume/cancel/retry, interruption recovery after reopening, offline playback, and saved progress on a supported Android device with media you are authorized to use.
 - [ ] Run `python3 scripts/sync_notices.py --check`, then verify that creator credit and the full custom license are accessible through Settings in the installed app. Verify that Flutter's generated dependency notices cover the shipped packages; the new screen alone does not prove completeness.
 - [ ] Confirm there are no ads, paid access, or paid feature unlocks, including in download links and hosted access pages.
 - [ ] Review Android production signing and package/version configuration. Follow [signing setup](signing.md), test rejection of missing or incomplete credentials, and verify the built artifact's production certificate. Never commit signing keys or their passwords.

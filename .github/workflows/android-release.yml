@@ -140,7 +140,7 @@ jobs:
           set -euo pipefail
           cd release
           sha256sum --check SHA256SUMS
-          printf 'Android production release.\n\nBuild number: %s\nSource commit: %s\n\nInstall MovieBox-%s.apk. SHA256SUMS contains its SHA-256 checksum; signing-certificate.txt identifies the signing certificate.\n\nAndroid phones, tablets, and Android TV only. Downloads run while the app stays open. A previous installation signed with a different key must be uninstalled first, which removes its local app data.\n' \
+          printf 'Android production release.\n\nBuild number: %s\nSource commit: %s\n\nInstall MovieBox-%s.apk. SHA256SUMS contains its SHA-256 checksum; signing-certificate.txt identifies the signing certificate.\n\nAndroid phones, tablets, and Android TV only.\n\nBackground downloads continue on Android with progress notifications. Manage the persistent queue in Downloads with pause, resume, cancel, and retry. Android force-stop and battery restrictions can interrupt downloads; reopen MovieBox to recover the queue and resume or retry interrupted items. Allow MovieBox notifications to start, resume, or retry downloads; if denied, enable them in Android Settings. Pause/resume depends on server support and link availability. Unknown-length sources are rejected; choose another quality.\n\nA previous installation signed with a different key must be uninstalled first, which removes its local app data.\n' \
             "$BUILD_NUMBER" "$RELEASE_COMMIT" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
           gh release create "v$VERSION" "MovieBox-$VERSION.apk" SHA256SUMS signing-certificate.txt \
             --target "$RELEASE_COMMIT" --title "MovieBox $VERSION" \
