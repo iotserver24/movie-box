@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:movie_box_app/api.dart';
 import 'package:movie_box_app/library.dart';
+import 'package:movie_box_app/main.dart';
 import 'package:movie_box_app/model.dart';
 import 'package:movie_box_app/player.dart';
 import 'package:movie_box_app/screens.dart';
@@ -111,8 +112,9 @@ void main() {
     expect(find.text('Second Page'), findsOneWidget);
     await tester.tap(find.text('Example Title'));
     await tester.pumpAndSettle();
-    expect(find.text('Download video + subtitles'), findsOneWidget);
-    expect(find.text('Title details'), findsNothing);
+    expect(find.text('Title details'), findsOneWidget);
+    expect(find.text('Play'), findsOneWidget);
+    expect(find.text('Download video + subtitles'), findsNothing);
   });
 
   testWidgets('Search waits for results while typing and replaces the query', (
@@ -212,7 +214,9 @@ void main() {
     },
   );
 
-  testWidgets('Continue Watching opens the tapped episode', (tester) async {
+  testWidgets('Continue Watching groups series and opens its latest episode', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final library = MovieLibrary(await SharedPreferences.getInstance());
     final title = MovieTitle.fromJson({
@@ -232,7 +236,8 @@ void main() {
         home: Builder(
           builder: (context) => Scaffold(
             body: ContinueRow(
-              library.history.values.toList(),
+              latestWatchEntries(library.history.values),
+              library,
               (entry) =>
                   openTitle(context, api, library, entry.title, resume: entry),
             ),
@@ -240,9 +245,220 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('S1 E1 · 1 min'));
+    expect(latestWatchEntries(library.history.values), hasLength(1));
+    expect(find.text('S1 E1 · 1 min'), findsNothing);
+    await tester.tap(find.text('S1 E2 · 2 min'));
     await tester.pumpAndSettle();
-    expect(tester.widget<PlayerScreen>(find.byType(PlayerScreen)).episode, 1);
+    expect(tester.widget<PlayerScreen>(find.byType(PlayerScreen)).episode, 2);
+  });
+
+  testWidgets('Downloaded playback still loads the full episode list', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final library = MovieLibrary(await SharedPreferences.getInstance());
+    final title = MovieTitle.fromJson({
+      'id': '1',
+      'detail_path': 'series',
+      'kind': 'series',
+      'title': 'Series',
+    });
+    final saved = SavedDownload(
+      title,
+      1,
+      2,
+      '360',
+      '/tmp/missing-moviebox.mp4',
+      null,
+    );
+    final api = MovieApi(
+      baseUrl: 'http://example.test',
+      client: MockClient(
+        (request) async => http.Response(
+          jsonEncode({
+            'title': title.toJson(),
+            'seasons': [
+              {
+                'number': 1,
+                'episode_count': 5,
+                'resolutions': [360],
+              },
+              {
+                'number': 2,
+                'episode_count': 3,
+                'resolutions': [360],
+              },
+            ],
+            'dubs': [],
+          }),
+          200,
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PlayerScreen(
+          api: api,
+          library: library,
+          title: title,
+          season: 1,
+          episode: 2,
+          offline: saved,
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    await tester.drag(find.byType(ListView).first, const Offset(0, -500));
+    await tester.pump();
+    expect(find.text('Season 1'), findsOneWidget);
+    final selector = find.byKey(const ValueKey('mobile-episode-selector'));
+    final dropdown = tester.widget<DropdownButton<(int, int)>>(selector);
+    expect(dropdown.value, (1, 2));
+    expect(dropdown.items!.map((item) => item.value), [
+      (1, 1),
+      (1, 2),
+      (1, 3),
+      (1, 4),
+      (1, 5),
+    ]);
+    expect(find.byType(ChoiceChip), findsNothing);
+    expect(find.text('Season 1 · Episode 2'), findsOneWidget);
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+    expect(find.text('Episode 5').hitTestable(), findsOneWidget);
+    await tester.tap(find.text('Episode 3').hitTestable());
+    await tester.pump();
+    expect(find.text('Season 1 · Episode 3'), findsOneWidget);
+  });
+
+  testWidgets('TV player offers season, episode, and adjacent controls', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final library = MovieLibrary(await SharedPreferences.getInstance());
+    final title = MovieTitle.fromJson({
+      'id': '1',
+      'detail_path': 'series',
+      'kind': 'series',
+      'title': 'Series',
+    });
+    final api = MovieApi(
+      baseUrl: 'http://example.test',
+      client: MockClient(
+        (request) async => http.Response(
+          jsonEncode({
+            'title': title.toJson(),
+            'seasons': [
+              {'number': 1, 'episode_count': 3},
+              {'number': 2, 'episode_count': 2},
+            ],
+            'dubs': [],
+          }),
+          200,
+        ),
+      ),
+    );
+    await tester.binding.setSurfaceSize(const Size(1280, 720));
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PlayerScreen(
+          api: api,
+          library: library,
+          title: title,
+          season: 1,
+          episode: 2,
+          offline: SavedDownload(
+            title,
+            1,
+            2,
+            '360',
+            '/tmp/missing-tv.mp4',
+            null,
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+    expect(find.text('Previous'), findsOneWidget);
+    expect(find.text('Next'), findsOneWidget);
+    expect(find.text('Season 1'), findsOneWidget);
+    expect(find.text('Episode 3'), findsOneWidget);
+    expect(find.text('Download video + subtitles'), findsNothing);
+    await tester.tap(find.text('Episode 3'));
+    await tester.pump();
+    expect(find.textContaining('S1 E3'), findsOneWidget);
+  });
+
+  testWidgets('Wide TV layout navigates all five destinations', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final library = MovieLibrary(await SharedPreferences.getInstance());
+    await tester.binding.setSurfaceSize(const Size(1280, 720));
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.pumpWidget(MovieBoxApp(library: library));
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    for (final pair in [
+      ('Library', 'No bookmarks yet.'),
+      ('Search', 'Find a movie or series'),
+      ('Downloads', 'Saved on this device'),
+      ('Settings', 'API address'),
+    ]) {
+      await tester.tap(find.text(pair.$1).first);
+      await tester.pump();
+      expect(find.textContaining(pair.$2), findsWidgets);
+      if (pair.$1 == 'Search') {
+        await tester.pump();
+        expect(find.text('Clear'), findsOneWidget);
+        expect(find.byType(TextField), findsOneWidget);
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus,
+          isTrue,
+        );
+      }
+    }
+    await tester.tap(find.text('Home').first);
+    await tester.pump();
+    expect(find.byType(HomeScreen), findsOneWidget);
+  });
+
+  test('Download artwork path persists with the episode', () async {
+    final title = MovieTitle.fromJson({
+      'id': '1',
+      'detail_path': 'series',
+      'kind': 'series',
+      'title': 'Series',
+    });
+    final saved = SavedDownload(
+      title,
+      1,
+      2,
+      '360',
+      '/tmp/video.mp4',
+      null,
+      thumbnailPath: '/tmp/video.mp4.jpg',
+    );
+    final restored = SavedDownload.fromJson(saved.toJson());
+    expect(restored.thumbnailPath, '/tmp/video.mp4.jpg');
+    expect(restored.key, 'series:1:2');
   });
 
   test('watch progress and downloads persist locally', () async {

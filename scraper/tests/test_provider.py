@@ -128,13 +128,22 @@ def test_catalog_and_rankings():
         service.catalog("invalid")
 
 
-def test_detail_playback_captions_and_api_contract():
+@pytest.mark.parametrize("params", [{}, {"season": 0, "episode": 0}, {"season": 0, "episode": 1}, {"season": 1, "episode": 0}, {"season": 1, "episode": 1}, {"season": 4, "episode": 9}])
+def test_detail_playback_captions_and_api_contract(params):
+    calls = []
+
     def playback(request):
+        calls.append("playback")
         assert request.url.params["subjectId"] == "123"
+        assert request.url.params["se"] == "0"
+        assert request.url.params["ep"] == "0"
         return {"streams": [{"id": "video-1", "format": "MP4", "resolutions": "1080", "url": "https://cdn.test/movie.mp4?sign=secret", "size": "200", "duration": 90}], "dash": [], "hls": [], "playConfig": {"maxResolution": 480}}
 
     def captions(request):
+        calls.append("captions")
         assert request.url.params["id"] == "video-1"
+        assert request.url.params["subjectId"] == "123"
+        assert request.url.params["format"] == "MP4"
         return {"captions": [{"lan": "en", "lanName": "English", "url": "https://cdn.test/movie.srt?sign=secret", "size": "42", "delay": 0}]}
 
     service = source({
@@ -148,14 +157,74 @@ def test_detail_playback_captions_and_api_contract():
         with TestClient(app) as client:
             base = "/v1/titles/example-movie-abc"
             assert client.get("/health").json() == {"status": "ok"}
-            assert client.get(base).json()["title"]["id"] == "123"
+            detail = client.get(base).json()
+            assert detail["title"]["id"] == "123"
+            assert detail["seasons"] == []
             assert client.get(base + "/recommendations").json()["items"][0]["kind"] == "series"
-            stream = client.get(base + "/playback").json()
+            stream = client.get(base + "/playback", params=params).json()
+            assert stream["season"] == 0 and stream["episode"] == 0
             assert stream["streams"][0]["format"] == "MP4"
             assert stream["max_resolution"] == 480
-            assert client.get(base + "/captions?stream_id=video-1").json()[0]["format"] == "srt"
-            assert client.get(base + "/captions?stream_id=unknown").status_code == 404
+            assert client.get(base + "/captions", params={**params, "stream_id": "video-1"}).json()[0]["format"] == "srt"
+            assert client.get(base + "/captions", params={**params, "stream_id": "unknown"}).status_code == 404
+            assert calls == ["playback", "playback", "captions", "playback"]
             assert client.get(base + "/episodes?season=1").status_code == 404
             assert client.get("/v1/browse?page=0").status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("subject_type", [1, 2, 7, 0])
+def test_detail_only_exposes_positive_episodic_seasons(subject_type):
+    service = source({
+        ("GET", "/wefeed-h5api-bff/detail"): {
+            "subject": {**SERIES, "subjectType": subject_type},
+            "resource": {"seasons": [
+                {"se": 0, "maxEp": 0},
+                {"se": 0, "maxEp": 3},
+                {"se": 1, "maxEp": 0},
+                {"se": -1, "maxEp": 3},
+                {"se": 1, "maxEp": -1},
+                {"se": "2", "maxEp": "3", "resolutions": [{"resolution": 1080}]},
+            ]},
+        },
+    })
+    detail = service.detail(SERIES["detailPath"])
+    if subject_type == 1:
+        assert detail.seasons == []
+        with pytest.raises(ProviderError) as error:
+            service.episodes(SERIES["detailPath"], 2)
+        assert error.value.status == 404
+    else:
+        assert [season.model_dump() for season in detail.seasons] == [{"number": 2, "episode_count": 3, "resolutions": [1080]}]
+        assert [(episode.season, episode.number) for episode in service.episodes(SERIES["detailPath"], 2)] == [(2, 1), (2, 2), (2, 3)]
+
+
+@pytest.mark.parametrize("subject_type", [2, 7])
+def test_series_playback_preserves_positive_season_and_episode(subject_type):
+    def playback(request):
+        assert request.url.params["subjectId"] == "456"
+        assert request.url.params["se"] == "2"
+        assert request.url.params["ep"] == "3"
+        return {"streams": []}
+
+    service = source({
+        ("GET", "/wefeed-h5api-bff/detail"): {"subject": {**SERIES, "subjectType": subject_type}},
+        ("GET", "/wefeed-h5api-bff/subject/play"): playback,
+    })
+    result = service.playback(SERIES["detailPath"], 2, 3)
+    assert result.season == 2 and result.episode == 3
+
+
+@pytest.mark.parametrize("subject_type", [2, 7])
+@pytest.mark.parametrize("season,episode", [(0, 0), (0, 1), (1, 0), (-1, 1), (1, -1)])
+def test_series_playback_rejects_invalid_season_or_episode(subject_type, season, episode):
+    service = source({
+        ("GET", "/wefeed-h5api-bff/detail"): {"subject": {**SERIES, "subjectType": subject_type}},
+    })
+    with pytest.raises(ProviderError, match="Series playback requires season and episode") as error:
+        service.playback(SERIES["detailPath"], season, episode)
+    assert error.value.status == 422
+    with pytest.raises(ProviderError, match="Series playback requires season and episode") as error:
+        service.captions(SERIES["detailPath"], "video-1", season, episode)
+    assert error.value.status == 422

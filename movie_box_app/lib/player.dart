@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 
 import 'api.dart';
 import 'library.dart';
+import 'loading.dart';
 import 'model.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -39,30 +40,53 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<MovieCaption> captions = [];
   String captionLabel = 'Off';
   bool loading = true;
+  String loadingLabel = 'Opening video';
+  String? actionLoading;
+  bool lastBuffering = false;
+  bool lastPlaying = false;
+  String? lastPlaybackError;
   bool fullscreen = false;
+  bool rotatedFullscreen = false;
+  bool tvImmersive = false;
   bool controlsVisible = true;
+  final videoFocus = FocusNode(debugLabel: 'Video');
+  final tvControlsFocus = FocusNode(debugLabel: 'TV controls');
+  bool get tvMode =>
+      MediaQuery.sizeOf(context).width >= 900 &&
+      MediaQuery.sizeOf(context).shortestSide >= 500;
+  bool get expandedControls => tvMode || fullscreen;
   Timer? controlsTimer;
   Offset? doubleTapPosition;
   String? error;
   int lastSaved = -1;
   int lastRendered = -1;
-  late int season = widget.season;
-  late int episode = widget.episode;
+  late int season = widget.title.kind == 'movie' ? 0 : widget.season;
+  late int episode = widget.title.kind == 'movie' ? 0 : widget.episode;
   final downloadTask = DownloadTask();
 
   @override
   void initState() {
     super.initState();
     currentOffline = widget.offline;
-    if (currentOffline == null) {
-      widget.api
-          .detail(widget.title.path)
-          .then((value) {
-            if (mounted) setState(() => detail = value);
-          })
-          .catchError((_) {});
-    }
+    widget.api
+        .detail(widget.title.path)
+        .then((value) {
+          if (mounted) setState(() => detail = value);
+        })
+        .catchError((_) {});
     initialize();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (tvMode && !tvImmersive) {
+      tvImmersive = true;
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else if (!tvMode && tvImmersive) {
+      tvImmersive = false;
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
   }
 
   Future<void> initialize() async {
@@ -167,7 +191,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     selected = stream;
     captions = [];
     captionLabel = 'Off';
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        if (loading && loadingLabel != 'Switching quality') {
+          loadingLabel = 'Loading subtitles';
+        }
+      });
+    }
     await loadEnglish(stream);
   }
 
@@ -219,14 +249,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void onProgress() {
     final player = controller;
-    if (player == null || !player.value.isInitialized || !mounted) return;
+    if (player == null || !mounted) return;
     final seconds = player.value.position.inSeconds;
     if (seconds > 0 && (lastSaved < 0 || (seconds - lastSaved).abs() >= 5)) {
       lastSaved = seconds;
       savePosition();
     }
-    if (seconds != lastRendered) {
+    if (seconds != lastRendered ||
+        player.value.isBuffering != lastBuffering ||
+        player.value.isPlaying != lastPlaying ||
+        player.value.errorDescription != lastPlaybackError) {
       lastRendered = seconds;
+      lastBuffering = player.value.isBuffering;
+      lastPlaying = player.value.isPlaying;
+      lastPlaybackError = player.value.errorDescription;
       setState(() {});
     }
   }
@@ -240,7 +276,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     savePosition();
     final previous = controller;
     previous?.removeListener(onProgress);
-    controller = null;
+    setState(() {
+      controller = null;
+      loading = true;
+      loadingLabel = 'Loading episode';
+      error = null;
+    });
     await previous?.dispose();
     if (!mounted) return;
     setState(() {
@@ -264,16 +305,62 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await initialize();
   }
 
+  Future<T> withLoading<T>(String label, Future<T> Function() operation) async {
+    if (mounted) setState(() => actionLoading = label);
+    try {
+      return await operation();
+    } finally {
+      if (mounted) setState(() => actionLoading = null);
+    }
+  }
+
   Future<void> chooseCaption() async {
+    if (loading || actionLoading != null) return;
     final player = controller;
-    if (player == null || selected == null) return;
+    if (player == null) return;
+    if (selected == null) {
+      final path = currentOffline?.subtitlePath;
+      if (path == null || !await File(path).exists() || !mounted) return;
+      final saved = await showModalBottomSheet<bool>(
+        context: context,
+        builder: (_) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(title: Text('Subtitles')),
+              ListTile(
+                title: const Text('Off'),
+                onTap: () => Navigator.pop(context, false),
+              ),
+              ListTile(
+                title: const Text('Saved subtitles'),
+                onTap: () => Navigator.pop(context, true),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (saved == null || !mounted) return;
+      await player.setClosedCaptionFile(
+        saved
+            ? Future.value(SrtCaptions(await File(path).readAsString()))
+            : null,
+      );
+      if (mounted) {
+        setState(() => captionLabel = saved ? 'Saved subtitles' : 'Off');
+      }
+      return;
+    }
     try {
       if (captions.isEmpty) {
-        captions = await widget.api.captions(
-          widget.title.path,
-          selected!.id,
-          season,
-          episode,
+        captions = await withLoading(
+          'Loading subtitles',
+          () => widget.api.captions(
+            widget.title.path,
+            selected!.id,
+            season,
+            episode,
+          ),
         );
       }
       if (!mounted) return;
@@ -303,9 +390,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         captionLabel = 'Off';
       } else {
         final caption = choice as MovieCaption;
-        final response = await http.get(
-          Uri.parse(caption.url),
-          headers: caption.headers,
+        final response = await withLoading(
+          'Loading subtitles',
+          () => http.get(Uri.parse(caption.url), headers: caption.headers),
         );
         if (response.statusCode != 200 && response.statusCode != 206) {
           throw ApiException('Subtitles returned HTTP ${response.statusCode}.');
@@ -327,11 +414,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> chooseQuality() async {
-    final streams =
-        playback?.streams
-            .where((s) => s.format.toUpperCase() == 'MP4' && !s.locked)
-            .toList() ??
-        [];
+    if (loading || actionLoading != null) return;
+    try {
+      playback ??= await withLoading(
+        'Loading qualities',
+        () => widget.api.playback(widget.title.path, season, episode),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
+      return;
+    }
+    if (!mounted) return;
+    final streams = playback!.streams
+        .where((s) => s.format.toUpperCase() == 'MP4' && !s.locked)
+        .toList();
     if (streams.isEmpty) return;
     final choice = await showModalBottomSheet<MovieStream>(
       context: context,
@@ -353,7 +452,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
     if (choice == null || choice.id == selected?.id || !mounted) return;
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      loadingLabel = 'Switching quality';
+    });
     try {
       final fresh = await widget.api.playback(
         widget.title.path,
@@ -365,21 +467,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
         (s) => s.format == choice.format && s.resolution == choice.resolution,
       );
       await selectStream(stream);
-      if (mounted) setState(() => error = null);
+      if (mounted) {
+        setState(() {
+          currentOffline = null;
+          error = null;
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) {
+        setState(() => error = '$e');
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not switch quality: $e')));
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
   }
 
   Future<void> downloadCurrent() async {
-    if (currentOffline != null || downloadTask.active) return;
+    if (loading ||
+        actionLoading != null ||
+        currentOffline != null ||
+        downloadTask.active) {
+      return;
+    }
     try {
-      final fresh = await widget.api.playback(
-        widget.title.path,
-        season,
-        episode,
+      final fresh = await withLoading(
+        'Getting download options',
+        () => widget.api.playback(widget.title.path, season, episode),
       );
       if (!mounted) return;
       final streams = fresh.streams
@@ -412,11 +528,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (stream == null || !mounted) return;
       List<MovieCaption> available;
       try {
-        available = await widget.api.captions(
-          widget.title.path,
-          stream.id,
-          season,
-          episode,
+        available = await withLoading(
+          'Loading subtitles',
+          () => widget.api.captions(
+            widget.title.path,
+            stream.id,
+            season,
+            episode,
+          ),
         );
       } catch (_) {
         available = [];
@@ -446,7 +565,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final saved = await downloadTask.start(
         widget.api,
         widget.library,
-        widget.title,
+        detail?.title ?? widget.title,
         season,
         episode,
         stream,
@@ -502,11 +621,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void revealControls() {
     controlsTimer?.cancel();
     if (mounted) setState(() => controlsVisible = true);
-    controlsTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && controller?.value.isPlaying == true) {
-        setState(() => controlsVisible = false);
-      }
-    });
+    controlsTimer = Timer(
+      Duration(seconds: MediaQuery.sizeOf(context).shortestSide >= 500 ? 8 : 3),
+      () {
+        if (mounted &&
+            controller?.value.isPlaying == true &&
+            !tvControlsFocus.hasFocus &&
+            (!videoFocus.hasFocus || videoFocus.hasPrimaryFocus)) {
+          setState(() => controlsVisible = false);
+        }
+      },
+    );
   }
 
   void toggleControls() {
@@ -541,163 +666,628 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> toggleFullscreen() async {
     if (fullscreen) {
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-      ]);
+      if (rotatedFullscreen) {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+        ]);
+      }
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      rotatedFullscreen = false;
     } else {
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      rotatedFullscreen = MediaQuery.sizeOf(context).shortestSide < 500;
+      if (rotatedFullscreen) {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     }
     if (mounted) setState(() => fullscreen = !fullscreen);
     revealControls();
   }
 
-  Widget videoSurface(VideoPlayerController? player) => Container(
-    color: Colors.black,
-    width: double.infinity,
-    child: AspectRatio(
-      aspectRatio: fullscreen ? MediaQuery.sizeOf(context).aspectRatio : 16 / 9,
-      child: error != null && player == null
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+  String? get loadingMessage {
+    if (loading) return loadingLabel;
+    if (actionLoading != null) return actionLoading;
+    if (controller?.value.isBuffering == true &&
+        controller?.value.hasError != true) {
+      return 'Buffering video';
+    }
+    return null;
+  }
+
+  Widget videoSurface(
+    VideoPlayerController? player, {
+    double panelHeight = 0,
+  }) => Focus(
+    focusNode: videoFocus,
+    autofocus: true,
+    onKeyEvent: (_, event) {
+      if (!videoFocus.hasPrimaryFocus ||
+          (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
+        return KeyEventResult.ignored;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        seekBy(-10);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        seekBy(10);
+        return KeyEventResult.handled;
+      }
+      if ((event.logicalKey == LogicalKeyboardKey.arrowUp ||
+              event.logicalKey == LogicalKeyboardKey.arrowDown) &&
+          !controlsVisible) {
+        revealControls();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.select ||
+          event.logicalKey == LogicalKeyboardKey.space) {
+        if (event is KeyDownEvent) togglePlayback();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+    child: Container(
+      color: Colors.black,
+      width: double.infinity,
+      child: AspectRatio(
+        aspectRatio: fullscreen
+            ? MediaQuery.sizeOf(context).aspectRatio
+            : 16 / 9,
+        child:
+            !loading &&
+                ((error != null && player == null) ||
+                    player?.value.hasError == true)
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        error ??
+                            player?.value.errorDescription ??
+                            'Playback failed.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          loading = true;
+                          loadingLabel = 'Opening video';
+                          error = null;
+                        });
+                        initialize();
+                      },
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              )
+            : player == null || !player.value.isInitialized
+            ? Center(child: MovieBoxLoader(label: loadingLabel))
+            : Stack(
+                alignment: Alignment.center,
                 children: [
-                  Text(error!, textAlign: TextAlign.center),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        loading = true;
-                        error = null;
-                      });
-                      initialize();
-                    },
-                    child: const Text('Try again'),
+                  Center(
+                    child: AspectRatio(
+                      aspectRatio: player.value.aspectRatio,
+                      child: VideoPlayer(player),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: toggleControls,
+                      onDoubleTapDown: (details) =>
+                          doubleTapPosition = details.localPosition,
+                      onDoubleTap: () {
+                        final x = doubleTapPosition?.dx ?? 0;
+                        final width = MediaQuery.sizeOf(context).width;
+                        if (x < width / 2) {
+                          seekBy(-10);
+                        } else {
+                          seekBy(10);
+                        }
+                      },
+                    ),
+                  ),
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: controlsVisible
+                        ? (expandedControls ? panelHeight + 8 : 54)
+                        : 10,
+                    child: ClosedCaption(
+                      text: player.value.caption.text,
+                      textStyle: const TextStyle(
+                        fontSize: 18,
+                        color: Colors.white,
+                        backgroundColor: Color(0xC0000000),
+                      ),
+                    ),
+                  ),
+                  if (controlsVisible) ...[
+                    Positioned.fill(
+                      top: expandedControls ? 56 : 0,
+                      bottom: expandedControls ? panelHeight + 48 : 0,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            tooltip: 'Back 10 seconds',
+                            icon: const Icon(Icons.replay_10),
+                            onPressed: () => seekBy(-10),
+                          ),
+                          const SizedBox(width: 22),
+                          IconButton(
+                            tooltip: player.value.isPlaying ? 'Pause' : 'Play',
+                            iconSize: 48,
+                            icon: Icon(
+                              player.value.isPlaying
+                                  ? Icons.pause_circle
+                                  : Icons.play_circle,
+                            ),
+                            onPressed: togglePlayback,
+                          ),
+                          const SizedBox(width: 22),
+                          IconButton(
+                            tooltip: 'Forward 10 seconds',
+                            icon: const Icon(Icons.forward_10),
+                            onPressed: () => seekBy(10),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!expandedControls)
+                      Positioned(
+                        left: 8,
+                        right: 8,
+                        bottom: 0,
+                        child: Row(
+                          children: [
+                            Text(
+                              formatTime(player.value.position),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            Expanded(
+                              child: VideoProgressIndicator(
+                                player,
+                                allowScrubbing: true,
+                                padding: const EdgeInsets.all(8),
+                                colors: const VideoProgressColors(
+                                  playedColor: Color(0xFFF2B86B),
+                                ),
+                              ),
+                            ),
+                            Text(
+                              formatTime(player.value.duration),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            IconButton(
+                              tooltip: fullscreen
+                                  ? 'Exit fullscreen'
+                                  : 'Fullscreen',
+                              icon: Icon(
+                                fullscreen
+                                    ? Icons.fullscreen_exit
+                                    : Icons.fullscreen,
+                              ),
+                              onPressed: toggleFullscreen,
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                  Positioned(
+                    top: expandedControls && controlsVisible ? 56 : 12,
+                    left: 12,
+                    right: 12,
+                    child: IgnorePointer(
+                      child: AnimatedSwitcher(
+                        duration: MediaQuery.disableAnimationsOf(context)
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        child: loadingMessage == null
+                            ? const SizedBox.shrink()
+                            : Center(
+                                key: const ValueKey('player-loading'),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xE6101519),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 8,
+                                    ),
+                                    child: MovieBoxLoader(
+                                      label: loadingMessage!,
+                                      compact: true,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
                   ),
                 ],
               ),
+      ),
+    ),
+  );
+
+  List<(int, int)> get episodeOptions {
+    if ((detail?.title ?? widget.title).kind == 'movie') return [];
+    final seasons = detail?.seasons ?? [];
+    if (seasons.isNotEmpty) {
+      return [
+        for (final item in seasons)
+          for (var number = 1; number <= item.episodes; number++)
+            (item.number, number),
+      ];
+    }
+    final saved =
+        widget.library.downloads.values
+            .where(
+              (item) => item.title.path == widget.title.path && item.season > 0,
             )
-          : player == null || !player.value.isInitialized
-          ? const Center(child: CircularProgressIndicator())
-          : Stack(
-              alignment: Alignment.center,
+            .map((item) => (item.season, item.episode))
+            .toList()
+          ..sort(
+            (a, b) =>
+                a.$1 != b.$1 ? a.$1.compareTo(b.$1) : a.$2.compareTo(b.$2),
+          );
+    return saved;
+  }
+
+  (int, int)? adjacentEpisode(int direction) {
+    final options = episodeOptions;
+    final index = options.indexOf((season, episode));
+    final next = index + direction;
+    return index < 0 || next < 0 || next >= options.length
+        ? null
+        : options[next];
+  }
+
+  List<(int, int)> get mobileEpisodeOptions =>
+      detail?.seasons.isNotEmpty == true
+      ? episodeOptions.where((item) => item.$1 == season).toList()
+      : episodeOptions;
+
+  Widget mobileEpisodeSelector() {
+    final options = mobileEpisodeOptions;
+    final includeSeason = detail?.seasons.isNotEmpty != true;
+    return DropdownButton<(int, int)>(
+      key: const ValueKey('mobile-episode-selector'),
+      value: options.contains((season, episode)) ? (season, episode) : null,
+      hint: Text('Episode $episode'),
+      items: [
+        for (final item in options)
+          DropdownMenuItem(
+            value: item,
+            child: Text(
+              '${includeSeason ? 'S${item.$1} · ' : ''}Episode ${item.$2}',
+            ),
+          ),
+      ],
+      onTap: () => controlsTimer?.cancel(),
+      onChanged: (value) {
+        revealControls();
+        if (value != null) changeEpisode(value.$1, value.$2);
+      },
+    );
+  }
+
+  Widget expandedPlayer(VideoPlayerController? player, MovieTitle info) {
+    final seasons = detail?.seasons ?? [];
+    final episodes = episodeOptions.where((item) => item.$1 == season).toList();
+    final previous = adjacentEpisode(-1);
+    final next = adjacentEpisode(1);
+    return SafeArea(
+      child: AnimatedBuilder(
+        animation: downloadTask,
+        builder: (context, _) => LayoutBuilder(
+          builder: (context, constraints) {
+            final compact =
+                constraints.maxWidth < 900 || constraints.maxHeight < 500;
+            final panelHeight =
+                (compact ? 84.0 : 102.0) +
+                (tvMode && episodes.isNotEmpty ? 56 : 0) +
+                (downloadTask.active ? 48 : 0);
+            return Stack(
+              fit: StackFit.expand,
               children: [
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: player.value.aspectRatio,
-                    child: VideoPlayer(player),
-                  ),
-                ),
                 Positioned.fill(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: toggleControls,
-                    onDoubleTapDown: (details) =>
-                        doubleTapPosition = details.localPosition,
-                    onDoubleTap: () {
-                      final x = doubleTapPosition?.dx ?? 0;
-                      final width = MediaQuery.sizeOf(context).width;
-                      if (x < width / 2) {
-                        seekBy(-10);
-                      } else {
-                        seekBy(10);
-                      }
-                    },
-                  ),
+                  child: videoSurface(player, panelHeight: panelHeight),
                 ),
-                Positioned(
-                  left: 16,
-                  right: 16,
-                  bottom: controlsVisible ? 54 : 10,
-                  child: ClosedCaption(
-                    text: player.value.caption.text,
-                    textStyle: const TextStyle(
-                      fontSize: 18,
-                      color: Colors.white,
-                      backgroundColor: Color(0xC0000000),
-                    ),
-                  ),
-                ),
-                if (controlsVisible) ...[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        tooltip: 'Back 10 seconds',
-                        icon: const Icon(Icons.replay_10),
-                        onPressed: () => seekBy(-10),
-                      ),
-                      const SizedBox(width: 22),
-                      IconButton(
-                        tooltip: player.value.isPlaying ? 'Pause' : 'Play',
-                        iconSize: 48,
-                        icon: Icon(
-                          player.value.isPlaying
-                              ? Icons.pause_circle
-                              : Icons.play_circle,
-                        ),
-                        onPressed: togglePlayback,
-                      ),
-                      const SizedBox(width: 22),
-                      IconButton(
-                        tooltip: 'Forward 10 seconds',
-                        icon: const Icon(Icons.forward_10),
-                        onPressed: () => seekBy(10),
-                      ),
-                    ],
-                  ),
-                  Positioned(
-                    left: 8,
-                    right: 8,
-                    bottom: 0,
-                    child: Row(
+                if (controlsVisible)
+                  Focus(
+                    focusNode: tvControlsFocus,
+                    canRequestFocus: false,
+                    child: Stack(
                       children: [
-                        Text(
-                          formatTime(player.value.position),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        Expanded(
-                          child: VideoProgressIndicator(
-                            player,
-                            allowScrubbing: true,
-                            padding: const EdgeInsets.all(8),
-                            colors: const VideoProgressColors(
-                              playedColor: Color(0xFFF2B86B),
+                        Positioned(
+                          top: compact ? 0 : 12,
+                          left: compact ? 8 : 16,
+                          right: compact ? 8 : 16,
+                          child: ColoredBox(
+                            color: const Color(0xA6101519),
+                            child: Row(
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () {
+                                    if (fullscreen && !tvMode) {
+                                      toggleFullscreen();
+                                    } else {
+                                      Navigator.maybePop(context);
+                                    }
+                                  },
+                                  icon: const Icon(Icons.arrow_back),
+                                  label: const Text('Back'),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Text(
+                                    '${info.title}${season > 0 ? ' · S$season E$episode' : ''}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: compact
+                                        ? Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                        : Theme.of(context)
+                                              .textTheme
+                                              .titleLarge,
+                                  ),
+                                ),
+                                if (fullscreen && !tvMode)
+                                  IconButton(
+                                    tooltip: 'Exit fullscreen',
+                                    onPressed: toggleFullscreen,
+                                    icon: const Icon(Icons.fullscreen_exit),
+                                  ),
+                                IconButton(
+                                  tooltip:
+                                      widget.library.bookmarks.containsKey(
+                                        widget.title.path,
+                                      )
+                                      ? 'Remove bookmark'
+                                      : 'Bookmark',
+                                  icon: Icon(
+                                    widget.library.bookmarks.containsKey(
+                                          widget.title.path,
+                                        )
+                                        ? Icons.bookmark
+                                        : Icons.bookmark_border,
+                                  ),
+                                  onPressed: () async {
+                                    await widget.library.toggleBookmark(info);
+                                    if (mounted) setState(() {});
+                                  },
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                        Text(
-                          formatTime(player.value.duration),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        IconButton(
-                          tooltip: fullscreen
-                              ? 'Exit fullscreen'
-                              : 'Fullscreen',
-                          icon: Icon(
-                            fullscreen
-                                ? Icons.fullscreen_exit
-                                : Icons.fullscreen,
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: compact
+                                ? const EdgeInsets.fromLTRB(12, 8, 12, 8)
+                                : const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                            color: const Color(0xEE101519),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (player != null &&
+                                    player.value.isInitialized)
+                                  Row(
+                                    children: [
+                                      Text(formatTime(player.value.position)),
+                                      Expanded(
+                                        child: VideoProgressIndicator(
+                                          player,
+                                          allowScrubbing: true,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 8,
+                                          ),
+                                          colors: const VideoProgressColors(
+                                            playedColor: Color(0xFFF2B86B),
+                                          ),
+                                        ),
+                                      ),
+                                      Text(formatTime(player.value.duration)),
+                                    ],
+                                  ),
+                                SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: SizedBox(
+                                    width: compact
+                                        ? null
+                                        : constraints.maxWidth - 40,
+                                    child: Row(
+                                      children: [
+                                        if (seasons.isNotEmpty)
+                                          DropdownButton<int>(
+                                            value:
+                                                seasons.any(
+                                                  (item) =>
+                                                      item.number == season,
+                                                )
+                                                ? season
+                                                : seasons.first.number,
+                                            items: [
+                                              for (final item in seasons)
+                                                DropdownMenuItem(
+                                                  value: item.number,
+                                                  child: Text(
+                                                    'Season ${item.number}',
+                                                  ),
+                                                ),
+                                            ],
+                                            onTap: tvMode
+                                                ? null
+                                                : () => controlsTimer?.cancel(),
+                                            onChanged: (value) {
+                                              if (!tvMode) revealControls();
+                                              if (value != null) {
+                                                changeEpisode(value, 1);
+                                              }
+                                            },
+                                          ),
+                                        if (!tvMode &&
+                                            mobileEpisodeOptions
+                                                .isNotEmpty) ...[
+                                          const SizedBox(width: 12),
+                                          mobileEpisodeSelector(),
+                                        ],
+                                        if (info.kind != 'movie') ...[
+                                          const SizedBox(width: 12),
+                                          OutlinedButton.icon(
+                                            onPressed: previous == null
+                                                ? null
+                                                : () => changeEpisode(
+                                                    previous.$1,
+                                                    previous.$2,
+                                                  ),
+                                            icon: const Icon(
+                                              Icons.skip_previous,
+                                            ),
+                                            label: const Text('Previous'),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          OutlinedButton.icon(
+                                            onPressed: next == null
+                                                ? null
+                                                : () => changeEpisode(
+                                                    next.$1,
+                                                    next.$2,
+                                                  ),
+                                            icon: const Icon(Icons.skip_next),
+                                            label: const Text('Next'),
+                                          ),
+                                        ],
+                                        if (compact)
+                                          const SizedBox(width: 12)
+                                        else
+                                          const Spacer(),
+                                        if (player?.value.isInitialized ==
+                                            true) ...[
+                                          OutlinedButton(
+                                            onPressed: chooseQuality,
+                                            child: Text(
+                                              'Quality ${currentOffline?.resolution ?? selected?.resolution ?? ''}p',
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          OutlinedButton(
+                                            onPressed:
+                                                currentOffline != null &&
+                                                    currentOffline!
+                                                            .subtitlePath ==
+                                                        null
+                                                ? null
+                                                : chooseCaption,
+                                            child: Text(
+                                              'Subtitles: $captionLabel',
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                        ],
+                                        OutlinedButton.icon(
+                                          onPressed:
+                                              currentOffline != null ||
+                                                  downloadTask.active
+                                              ? null
+                                              : downloadCurrent,
+                                          icon: const Icon(
+                                            Icons.download_outlined,
+                                          ),
+                                          label: Text(
+                                            currentOffline == null
+                                                ? 'Download'
+                                                : 'Saved',
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (tvMode && episodes.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    height: 48,
+                                    child: ListView.separated(
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: episodes.length,
+                                      separatorBuilder: (_, _) =>
+                                          const SizedBox(width: 8),
+                                      itemBuilder: (_, index) {
+                                        final item = episodes[index];
+                                        return ChoiceChip(
+                                          label: Text('Episode ${item.$2}'),
+                                          selected: episode == item.$2,
+                                          onSelected: (_) =>
+                                              changeEpisode(item.$1, item.$2),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                                if (downloadTask.active)
+                                  AnimatedBuilder(
+                                    animation: downloadTask,
+                                    builder: (_, _) => Row(
+                                      children: [
+                                        Expanded(
+                                          child: LinearProgressIndicator(
+                                            value: downloadTask.total == null
+                                                ? null
+                                                : downloadTask.received /
+                                                      downloadTask.total!,
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: downloadTask.cancel,
+                                          child: const Text('Pause download'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                          onPressed: toggleFullscreen,
                         ),
                       ],
                     ),
                   ),
-                ],
               ],
-            ),
-    ),
-  );
+            );
+          },
+        ),
+      ),
+    );
+  }
 
   @override
   void dispose() {
     controlsTimer?.cancel();
-    if (fullscreen) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    videoFocus.dispose();
+    tvControlsFocus.dispose();
+    if (fullscreen || tvImmersive) {
+      if (rotatedFullscreen) {
+        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      }
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
     savePosition();
@@ -719,20 +1309,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         .toList();
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.space): togglePlayback,
-        const SingleActivator(LogicalKeyboardKey.arrowLeft): () => seekBy(-10),
-        const SingleActivator(LogicalKeyboardKey.arrowRight): () => seekBy(10),
         const SingleActivator(LogicalKeyboardKey.keyF): () {
-          toggleFullscreen();
+          if (!tvMode) toggleFullscreen();
         },
         const SingleActivator(LogicalKeyboardKey.escape): () {
           if (fullscreen) toggleFullscreen();
         },
       },
-      child: Focus(
-        autofocus: true,
+      child: PopScope(
+        canPop: !fullscreen || tvMode,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && fullscreen && !tvMode) toggleFullscreen();
+        },
         child: Scaffold(
-          appBar: fullscreen
+          appBar: fullscreen || tvMode
               ? null
               : AppBar(
                   title: Text(
@@ -741,8 +1331,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-          body: fullscreen
-              ? videoSurface(player)
+          body: expandedControls
+              ? expandedPlayer(player, info)
               : SafeArea(
                   top: false,
                   child: ListView(
@@ -871,7 +1461,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
                           child: Text(info.description),
                         ),
-                      if (seasons.isNotEmpty || savedEpisodes.isNotEmpty) ...[
+                      if (info.kind != 'movie' &&
+                          (seasons.isNotEmpty || savedEpisodes.isNotEmpty)) ...[
                         Padding(
                           padding: const EdgeInsets.fromLTRB(18, 20, 18, 8),
                           child: Text(
@@ -901,48 +1492,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 18),
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              if (seasons.isNotEmpty)
-                                for (
-                                  var i = 1;
-                                  i <=
-                                      seasons
-                                          .firstWhere(
-                                            (item) =>
-                                                item.number ==
-                                                (seasons.any(
-                                                      (s) => s.number == season,
-                                                    )
-                                                    ? season
-                                                    : seasons.first.number),
-                                          )
-                                          .episodes;
-                                  i++
-                                )
-                                  ChoiceChip(
-                                    label: Text('$i'),
-                                    selected: episode == i,
-                                    onSelected: (_) => changeEpisode(season, i),
-                                  )
-                              else
-                                for (final item in savedEpisodes)
-                                  ChoiceChip(
-                                    label: Text(
-                                      'S${item.season} E${item.episode}',
-                                    ),
-                                    selected:
-                                        season == item.season &&
-                                        episode == item.episode,
-                                    onSelected: (_) => changeEpisode(
-                                      item.season,
-                                      item.episode,
-                                    ),
-                                  ),
-                            ],
-                          ),
+                          child: mobileEpisodeSelector(),
                         ),
                       ],
                       const SizedBox(height: 28),

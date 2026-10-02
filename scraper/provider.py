@@ -267,12 +267,15 @@ class MovieBoxProvider:
             subject = data.get("subject")
             if not subject:
                 raise ProviderError("Title not found", 404)
-            seasons = [Season(number=int(x.get("se") or 0), episode_count=int(x.get("maxEp") or 0), resolutions=sorted({int(r["resolution"]) for r in x.get("resolutions") or [] if r.get("resolution")})) for x in (data.get("resource") or {}).get("seasons") or []]
+            title = _title(subject)
+            seasons = []
+            if title.kind != "movie":
+                seasons = [Season(number=int(x["se"]), episode_count=int(x["maxEp"]), resolutions=sorted({int(r["resolution"]) for r in x.get("resolutions") or [] if r.get("resolution")})) for x in (data.get("resource") or {}).get("seasons") or [] if int(x.get("se") or 0) > 0 and int(x.get("maxEp") or 0) > 0]
             dubs = [Dub(id=str(x.get("subjectId")), detail_path=x.get("detailPath") or "", language=x.get("lanCode") or "", label=x.get("lanName") or "", original=bool(x.get("original"))) for x in subject.get("dubs") or []]
             trailer = subject.get("trailer") or {}
             address = trailer.get("videoAddress") or {}
             video = address.get("url") if isinstance(address, dict) else None
-            return Detail(title=_title(subject), cast=[{"name": x.get("name"), "character": x.get("character"), "image_url": x.get("avatarUrl")} for x in data.get("stars") or []], seasons=seasons, dubs=dubs, trailer_url=video)
+            return Detail(title=title, cast=[{"name": x.get("name"), "character": x.get("character"), "image_url": x.get("avatarUrl")} for x in data.get("stars") or []], seasons=seasons, dubs=dubs, trailer_url=video)
         return self._cached(f"detail:{detail_path}", load)
 
     def episodes(self, detail_path: str, season: int) -> list[Episode]:
@@ -290,6 +293,8 @@ class MovieBoxProvider:
 
     def playback(self, detail_path: str, season: int = 0, episode: int = 0) -> Playback:
         title = self.detail(detail_path).title
+        if title.kind == "movie":
+            season, episode = 0, 0
         if title.kind in ("series", "short_series") and (season < 1 or episode < 1):
             raise ProviderError("Series playback requires season and episode", 422)
         title_page = f"{BASE_URL}/movies/{detail_path}"

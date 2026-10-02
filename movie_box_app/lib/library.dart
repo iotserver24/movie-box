@@ -2,12 +2,25 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'model.dart';
+
+const mediaChannel = MethodChannel('dev.r3ap3r.movie_box_app/media');
+
+Future<String?> extractThumbnail(String path) async {
+  try {
+    return await mediaChannel.invokeMethod<String>('thumbnail', path);
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
+}
 
 class MovieLibrary extends ChangeNotifier {
   final SharedPreferences prefs;
@@ -80,6 +93,34 @@ class MovieLibrary extends ChangeNotifier {
     await _saveDownloads();
   }
 
+  Future<void> backfillThumbnails() async {
+    for (final entry in downloads.values.toList()) {
+      if (!await File(entry.path).exists() ||
+          (entry.thumbnailPath?.endsWith('.preview.jpg') == true &&
+              await File(entry.thumbnailPath!).exists())) {
+        continue;
+      }
+      final path = await extractThumbnail(entry.path);
+      if (path != null && downloads[entry.key] == entry) {
+        await addDownload(
+          SavedDownload(
+            entry.title,
+            entry.season,
+            entry.episode,
+            entry.resolution,
+            entry.path,
+            entry.subtitlePath,
+            thumbnailPath: path,
+          ),
+        );
+        if (entry.thumbnailPath != null && entry.thumbnailPath != path) {
+          final old = File(entry.thumbnailPath!);
+          if (await old.exists()) await old.delete();
+        }
+      }
+    }
+  }
+
   Future<void> removeDownload(SavedDownload entry) async {
     downloads.remove(entry.key);
     await _saveDownloads();
@@ -88,6 +129,10 @@ class MovieLibrary extends ChangeNotifier {
     if (entry.subtitlePath != null) {
       final subtitle = File(entry.subtitlePath!);
       if (await subtitle.exists()) await subtitle.delete();
+    }
+    if (entry.thumbnailPath != null) {
+      final thumbnail = File(entry.thumbnailPath!);
+      if (await thumbnail.exists()) await thumbnail.delete();
     }
   }
 
@@ -209,6 +254,7 @@ class DownloadTask extends ChangeNotifier {
             }
           } catch (_) {}
         }
+        final thumbnailPath = await extractThumbnail(completed.path);
         final saved = SavedDownload(
           title,
           season,
@@ -216,6 +262,7 @@ class DownloadTask extends ChangeNotifier {
           stream.resolution,
           completed.path,
           subtitlePath,
+          thumbnailPath: thumbnailPath,
         );
         await library.addDownload(saved);
         return saved;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -9,6 +11,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final library = MovieLibrary(await SharedPreferences.getInstance());
   runApp(MovieBoxApp(library: library));
+  unawaited(library.backfillThumbnails());
 }
 
 class MovieBoxApp extends StatefulWidget {
@@ -73,50 +76,124 @@ class _MovieBoxAppState extends State<MovieBoxApp> {
           ),
         ),
       ),
-      home: Scaffold(
-        body: SafeArea(
-          child: IndexedStack(
+      home: LayoutBuilder(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 900;
+          final pages = IndexedStack(
             index: tab,
             children: [
-              HomeScreen(api: api, library: widget.library),
-              LibraryScreen(api: api, library: widget.library),
-              SearchScreen(api: api, library: widget.library),
-              BookmarksScreen(api: api, library: widget.library),
-              SettingsScreen(
-                api: api,
-                library: widget.library,
-                onSaved: updated,
+              TickerMode(
+                enabled: tab == 0,
+                child: HomeScreen(api: api, library: widget.library),
+              ),
+              TickerMode(
+                enabled: tab == 1,
+                child: BookmarksScreen(api: api, library: widget.library),
+              ),
+              TickerMode(
+                enabled: tab == 2,
+                child: SearchScreen(
+                  api: api,
+                  library: widget.library,
+                  active: tab == 2,
+                ),
+              ),
+              TickerMode(
+                enabled: tab == 3,
+                child: LibraryScreen(api: api, library: widget.library),
+              ),
+              TickerMode(
+                enabled: tab == 4,
+                child: SettingsScreen(
+                  api: api,
+                  library: widget.library,
+                  onSaved: updated,
+                ),
               ),
             ],
-          ),
-        ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: tab,
-          onDestinationSelected: (index) => setState(() => tab = index),
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home),
-              label: 'Home',
+          );
+          return Scaffold(
+            body: SafeArea(
+              child: wide
+                  ? Row(
+                      children: [
+                        NavigationRail(
+                          selectedIndex: tab,
+                          onDestinationSelected: (index) =>
+                              setState(() => tab = index),
+                          extended: constraints.maxWidth >= 1200,
+                          scrollable: true,
+                          labelType: constraints.maxWidth >= 1200
+                              ? NavigationRailLabelType.none
+                              : NavigationRailLabelType.all,
+                          destinations: const [
+                            NavigationRailDestination(
+                              icon: Icon(Icons.home_outlined),
+                              selectedIcon: Icon(Icons.home),
+                              label: Text('Home'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.bookmark_border),
+                              selectedIcon: Icon(Icons.bookmark),
+                              label: Text('Library'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.search),
+                              label: Text('Search'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.download_outlined),
+                              selectedIcon: Icon(Icons.download),
+                              label: Text('Downloads'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.settings_outlined),
+                              selectedIcon: Icon(Icons.settings),
+                              label: Text('Settings'),
+                            ),
+                          ],
+                        ),
+                        const VerticalDivider(width: 1),
+                        Expanded(child: pages),
+                      ],
+                    )
+                  : pages,
             ),
-            NavigationDestination(
-              icon: Icon(Icons.download_outlined),
-              selectedIcon: Icon(Icons.download),
-              label: 'Downloads',
-            ),
-            NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
-            NavigationDestination(
-              icon: Icon(Icons.bookmark_border),
-              selectedIcon: Icon(Icons.bookmark),
-              label: 'Library',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Settings',
-            ),
-          ],
-        ),
+            bottomNavigationBar: wide
+                ? null
+                : NavigationBar(
+                    selectedIndex: tab,
+                    onDestinationSelected: (index) =>
+                        setState(() => tab = index),
+                    destinations: const [
+                      NavigationDestination(
+                        icon: Icon(Icons.home_outlined),
+                        selectedIcon: Icon(Icons.home),
+                        label: 'Home',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.bookmark_border),
+                        selectedIcon: Icon(Icons.bookmark),
+                        label: 'Library',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.search),
+                        label: 'Search',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.download_outlined),
+                        selectedIcon: Icon(Icons.download),
+                        label: 'Downloads',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.settings_outlined),
+                        selectedIcon: Icon(Icons.settings),
+                        label: 'Settings',
+                      ),
+                    ],
+                  ),
+          );
+        },
       ),
       routes: {
         '/settings': (_) => SettingsScreen(

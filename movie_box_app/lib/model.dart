@@ -70,6 +70,12 @@ class MovieDetail {
     : title = MovieTitle.fromJson(data['title'] as Map<String, dynamic>),
       seasons = (data['seasons'] as List? ?? [])
           .map((e) => MovieSeason.fromJson(e as Map<String, dynamic>))
+          .where(
+            (season) =>
+                data['title']['kind'] != 'movie' &&
+                season.number > 0 &&
+                season.episodes > 0,
+          )
           .toList(),
       dubs = (data['dubs'] as List? ?? [])
           .map(
@@ -165,15 +171,16 @@ class SavedDownload {
   final MovieTitle title;
   final int season, episode;
   final String resolution, path;
-  final String? subtitlePath;
+  final String? subtitlePath, thumbnailPath;
   SavedDownload(
     this.title,
     this.season,
     this.episode,
     this.resolution,
     this.path,
-    this.subtitlePath,
-  );
+    this.subtitlePath, {
+    this.thumbnailPath,
+  });
   String get key => viewingKey(title.path, season, episode);
   Map<String, dynamic> toJson() => {
     'title': title.toJson(),
@@ -182,6 +189,7 @@ class SavedDownload {
     'resolution': resolution,
     'path': path,
     'subtitle_path': subtitlePath,
+    'thumbnail_path': thumbnailPath,
   };
   SavedDownload.fromJson(Map<String, dynamic> data)
     : title = MovieTitle.fromJson(data['title'] as Map<String, dynamic>),
@@ -189,5 +197,6 @@ class SavedDownload {
       episode = data['episode'] as int,
       resolution = data['resolution'] as String,
       path = data['path'] as String,
-      subtitlePath = data['subtitle_path'] as String?;
+      subtitlePath = data['subtitle_path'] as String?,
+      thumbnailPath = data['thumbnail_path'] as String?;
 }

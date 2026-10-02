@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'library.dart';
+import 'loading.dart';
 import 'model.dart';
 import 'player.dart';
 
@@ -22,12 +23,17 @@ void openTitle(
   WatchEntry? resume,
 }) {
   if (title.path.isEmpty) return;
-  final matches = library.history.values.where(
-    (entry) => entry.title.path == title.path,
-  );
-  final last = resume ?? (matches.isEmpty ? null : matches.last);
-  final season = last?.season ?? (title.kind == 'movie' ? 0 : 1);
-  final episode = last?.episode ?? (title.kind == 'movie' ? 0 : 1);
+  if (resume == null) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            DetailScreen(api: api, library: library, path: title.path),
+      ),
+    );
+    return;
+  }
+  final season = resume.season;
+  final episode = resume.episode;
   final saved = library.downloads[viewingKey(title.path, season, episode)];
   Navigator.of(context).push(
     MaterialPageRoute(
@@ -41,6 +47,15 @@ void openTitle(
       ),
     ),
   );
+}
+
+List<WatchEntry> latestWatchEntries(Iterable<WatchEntry> history) {
+  final seen = <String>{};
+  return history
+      .toList()
+      .reversed
+      .where((entry) => seen.add(entry.title.path))
+      .toList();
 }
 
 String artworkUrl(String source, int width) {
@@ -84,6 +99,25 @@ class Artwork extends StatelessWidget {
         );
 }
 
+class DownloadArtwork extends StatelessWidget {
+  final SavedDownload? download;
+  final MovieTitle title;
+  const DownloadArtwork({super.key, required this.title, this.download});
+
+  @override
+  Widget build(BuildContext context) {
+    final path = download?.thumbnailPath;
+    if (path == null || !File(path).existsSync()) {
+      return Artwork(url: title.poster ?? title.backdrop);
+    }
+    return Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => Artwork(url: title.poster ?? title.backdrop),
+    );
+  }
+}
+
 class Poster extends StatelessWidget {
   final MovieTitle title;
   final VoidCallback onTap;
@@ -94,6 +128,7 @@ class Poster extends StatelessWidget {
     child: InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
+      focusColor: const Color(0x66F2B86B),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -194,7 +229,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() {});
   }
 
-  void reload() => setState(() => data = widget.api.home());
+  void reload() {
+    setState(() {
+      data = widget.api.home();
+    });
+  }
+
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -205,32 +245,38 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) => RefreshIndicator(
     onRefresh: () async {
       reload();
-      await data;
+      try {
+        await data;
+      } catch (_) {
+        // The FutureBuilder displays refresh errors with a retry action.
+      }
     },
     child: FutureBuilder<MovieHome>(
       future: data,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState != ConnectionState.done ||
+            !snapshot.hasData) {
           return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             children: [
               const ScreenHeader('MovieBox'),
               SizedBox(
                 height: 400,
                 child: Center(
-                  child: snapshot.hasError
+                  child:
+                      snapshot.connectionState == ConnectionState.done &&
+                          snapshot.hasError
                       ? ErrorPanel(error: snapshot.error!, retry: reload)
-                      : const CircularProgressIndicator(),
+                      : const MovieBoxLoader(label: 'Loading your home'),
                 ),
               ),
             ],
           );
         }
         final home = snapshot.data!;
-        final history = widget.library.history.values
-            .toList()
-            .reversed
-            .toList();
+        final history = latestWatchEntries(widget.library.history.values);
         return ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: [
             const ScreenHeader('MovieBox'),
             PopularCarousel(
@@ -279,6 +325,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (history.isNotEmpty)
               ContinueRow(
                 history,
+                widget.library,
                 (entry) => openTitle(
                   context,
                   widget.api,
@@ -334,6 +381,8 @@ class _PopularCarouselState extends State<PopularCarousel> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: InkWell(
                   onTap: () => widget.onTap(title),
+                  borderRadius: BorderRadius.circular(18),
+                  focusColor: const Color(0x66F2B86B),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(18),
                     child: Stack(
@@ -417,8 +466,9 @@ class _PopularCarouselState extends State<PopularCarousel> {
 
 class ContinueRow extends StatelessWidget {
   final List<WatchEntry> entries;
+  final MovieLibrary library;
   final void Function(WatchEntry) onTap;
-  const ContinueRow(this.entries, this.onTap, {super.key});
+  const ContinueRow(this.entries, this.library, this.onTap, {super.key});
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -449,6 +499,8 @@ class ContinueRow extends StatelessWidget {
               width: 155,
               child: InkWell(
                 onTap: () => onTap(entry),
+                borderRadius: BorderRadius.circular(10),
+                focusColor: const Color(0x66F2B86B),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -457,7 +509,10 @@ class ContinueRow extends StatelessWidget {
                       child: SizedBox(
                         height: 175,
                         width: 155,
-                        child: Artwork(url: entry.title.poster),
+                        child: DownloadArtwork(
+                          title: entry.title,
+                          download: library.downloads[entry.key],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -568,53 +623,58 @@ class _CatalogScreenState extends State<CatalogScreen> {
   int? next = 1;
   bool loading = false;
   Object? error;
+  int generation = 0;
   @override
   void initState() {
     super.initState();
-    Future.microtask(load);
+    load();
   }
 
   @override
   void didUpdateWidget(covariant CatalogScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.api != widget.api) {
+    if (oldWidget.api != widget.api || oldWidget.name != widget.name) {
+      reload();
+    }
+  }
+
+  Future<void> reload() {
+    generation++;
+    setState(() {
       items.clear();
       next = 1;
-      load();
-    }
+      loading = false;
+    });
+    return load();
   }
 
   Future<void> load() async {
     if (loading || next == null) return;
     final page = next!;
+    final serial = generation;
     setState(() {
       loading = true;
       error = null;
     });
     try {
       final result = await widget.api.catalog(widget.name, page);
-      if (!mounted) return;
+      if (!mounted || serial != generation) return;
       setState(() {
         items.addAll(result.items);
         next = result.next;
       });
     } catch (e) {
-      if (mounted) setState(() => error = e);
+      if (mounted && serial == generation) setState(() => error = e);
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted && serial == generation) setState(() => loading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) => RefreshIndicator(
-    onRefresh: () async {
-      setState(() {
-        items.clear();
-        next = 1;
-      });
-      await load();
-    },
+    onRefresh: reload,
     child: CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
         SliverToBoxAdapter(child: ScreenHeader(widget.label)),
         if (items.isNotEmpty)
@@ -632,16 +692,20 @@ class _CatalogScreenState extends State<CatalogScreen> {
           ),
         if (error != null)
           SliverToBoxAdapter(
-            child: SizedBox(
-              height: items.isEmpty ? 320 : 100,
-              child: ErrorPanel(error: error!, retry: load),
-            ),
+            child: ErrorPanel(error: error!, retry: load),
           ),
         if (loading)
-          const SliverToBoxAdapter(
+          SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator()),
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: MovieBoxLoader(
+                  label: items.isEmpty
+                      ? 'Loading titles'
+                      : 'Loading more titles',
+                  compact: items.isNotEmpty,
+                ),
+              ),
             ),
           ),
         if (!loading && next != null && error == null)
@@ -662,13 +726,20 @@ class _CatalogScreenState extends State<CatalogScreen> {
 class SearchScreen extends StatefulWidget {
   final MovieApi api;
   final MovieLibrary library;
-  const SearchScreen({super.key, required this.api, required this.library});
+  final bool active;
+  const SearchScreen({
+    super.key,
+    required this.api,
+    required this.library,
+    this.active = true,
+  });
   @override
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
 class _SearchScreenState extends State<SearchScreen> {
   final text = TextEditingController();
+  final searchFocus = FocusNode(debugLabel: 'Search input');
   final items = <MovieTitle>[];
   List<String> hints = [];
   int? next;
@@ -689,9 +760,23 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant SearchScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.api != widget.api) changed(text.text);
+    if (widget.active &&
+        !oldWidget.active &&
+        MediaQuery.sizeOf(context).width >= 900) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.active) searchFocus.requestFocus();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     debounce?.cancel();
     text.dispose();
+    searchFocus.dispose();
     super.dispose();
   }
 
@@ -776,20 +861,45 @@ class _SearchScreenState extends State<SearchScreen> {
             const ScreenHeader('Search'),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                controller: text,
-                textInputAction: TextInputAction.search,
-                onChanged: changed,
-                onSubmitted: (_) => submit(),
-                decoration: InputDecoration(
-                  hintText: 'Find a movie or series',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: IconButton(
-                    tooltip: 'Search',
-                    icon: const Icon(Icons.arrow_forward),
-                    onPressed: submit,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      focusNode: searchFocus,
+                      controller: text,
+                      textInputAction: TextInputAction.search,
+                      onChanged: changed,
+                      onSubmitted: (_) => submit(),
+                      decoration: InputDecoration(
+                        hintText: 'Find a movie or series',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: MediaQuery.sizeOf(context).width >= 900
+                            ? null
+                            : IconButton(
+                                tooltip: 'Search',
+                                icon: const Icon(Icons.arrow_forward),
+                                onPressed: submit,
+                              ),
+                      ),
+                    ),
                   ),
-                ),
+                  if (MediaQuery.sizeOf(context).width >= 900) ...[
+                    const SizedBox(width: 12),
+                    FilledButton.icon(
+                      onPressed: submit,
+                      icon: const Icon(Icons.search),
+                      label: const Text('Search'),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () {
+                        text.clear();
+                        changed('');
+                      },
+                      child: const Text('Clear'),
+                    ),
+                  ],
+                ],
               ),
             ),
             if (hints.isNotEmpty) ...[
@@ -838,10 +948,17 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ),
       if (loading)
-        const SliverToBoxAdapter(
+        SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: MovieBoxLoader(
+                label: items.isEmpty
+                    ? 'Searching titles'
+                    : 'Loading more titles',
+                compact: items.isNotEmpty,
+              ),
+            ),
           ),
         ),
       if (!loading && next != null && error == null)
@@ -873,10 +990,32 @@ class DetailScreen extends StatefulWidget {
 }
 
 class _DetailScreenState extends State<DetailScreen> {
-  late Future<MovieDetail> future = widget.api.detail(widget.path);
+  late Future<MovieDetail> future;
   int season = 0, episode = 0;
   bool busy = false;
+  String? downloadLabel;
   final task = DownloadTask();
+
+  @override
+  void initState() {
+    super.initState();
+    future = loadDetail();
+  }
+
+  Future<MovieDetail> loadDetail() async {
+    final value = await widget.api.detail(widget.path);
+    if (mounted && season == 0 && episode == 0 && value.seasons.isNotEmpty) {
+      final recent = latestWatchEntries(widget.library.history.values)
+          .where((entry) => entry.title.path == widget.path)
+          .firstOrNull;
+      setState(() {
+        season = recent?.season ?? value.seasons.first.number;
+        episode = recent?.episode ?? 1;
+      });
+    }
+    return value;
+  }
+
   @override
   void dispose() {
     task.dispose();
@@ -904,7 +1043,10 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> download(MovieTitle title) async {
     if (busy) return;
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      downloadLabel = 'Getting download options';
+    });
     try {
       final playback = await widget.api.playback(title.path, season, episode);
       if (!mounted) return;
@@ -914,6 +1056,7 @@ class _DetailScreenState extends State<DetailScreen> {
       if (choices.isEmpty) {
         throw ApiException('No downloadable MP4 stream is available.');
       }
+      setState(() => downloadLabel = null);
       final selected = await showModalBottomSheet<MovieStream>(
         context: context,
         builder: (_) => SafeArea(
@@ -936,6 +1079,7 @@ class _DetailScreenState extends State<DetailScreen> {
         ),
       );
       if (selected == null || !mounted) return;
+      setState(() => downloadLabel = 'Preparing download');
       MovieCaption? caption;
       try {
         final options = await widget.api.captions(
@@ -951,6 +1095,8 @@ class _DetailScreenState extends State<DetailScreen> {
           }
         }
       } catch (_) {}
+      if (!mounted) return;
+      setState(() => downloadLabel = null);
       final saved = await task.start(
         widget.api,
         widget.library,
@@ -969,228 +1115,263 @@ class _DetailScreenState extends State<DetailScreen> {
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() {
+          busy = false;
+          downloadLabel = null;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Title details')),
-    body: FutureBuilder<MovieDetail>(
-      future: future,
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Center(
-            child: snapshot.hasError
-                ? ErrorPanel(
-                    error: snapshot.error!,
-                    retry: () =>
-                        setState(() => future = widget.api.detail(widget.path)),
-                  )
-                : const CircularProgressIndicator(),
-          );
-        }
-        final detail = snapshot.data!;
-        final title = detail.title;
-        final watch =
-            widget.library.history[viewingKey(title.path, season, episode)];
-        final saved =
-            widget.library.downloads[viewingKey(title.path, season, episode)];
-        return ListView(
-          children: [
-            SizedBox(
-              height: 230,
-              child: Artwork(url: title.backdrop ?? title.poster, width: 1080),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title.title,
-                    style: const TextStyle(
-                      fontSize: 29,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    [
-                      title.kind.toUpperCase(),
-                      if (title.rating != null) 'IMDb ${title.rating}',
-                      ...title.genres.take(3),
-                    ].join('  ·  '),
-                    style: const TextStyle(color: Color(0xFFBCC8C9)),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    title.description.isEmpty
-                        ? 'No synopsis available.'
-                        : title.description,
-                  ),
-                  if (detail.seasons.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Episodes',
-                      style: TextStyle(
-                        fontSize: 20,
+    body: SafeArea(
+      top: false,
+      child: FutureBuilder<MovieDetail>(
+        future: future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done ||
+              !snapshot.hasData) {
+            return Center(
+              child:
+                  snapshot.connectionState == ConnectionState.done &&
+                      snapshot.hasError
+                  ? ErrorPanel(
+                      error: snapshot.error!,
+                      retry: () => setState(() {
+                        future = loadDetail();
+                      }),
+                    )
+                  : const MovieBoxLoader(label: 'Loading details'),
+            );
+          }
+          final detail = snapshot.data!;
+          final title = detail.title;
+          final watch =
+              widget.library.history[viewingKey(title.path, season, episode)];
+          final saved =
+              widget.library.downloads[viewingKey(title.path, season, episode)];
+          return ListView(
+            children: [
+              SizedBox(
+                height: 230,
+                child: Artwork(
+                  url: title.backdrop ?? title.poster,
+                  width: 1080,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title.title,
+                      style: const TextStyle(
+                        fontSize: 29,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    DropdownButton<int>(
-                      value: detail.seasons.any((s) => s.number == season)
-                          ? season
-                          : detail.seasons.first.number,
-                      items: [
-                        for (final s in detail.seasons)
-                          DropdownMenuItem(
-                            value: s.number,
-                            child: Text('Season ${s.number}'),
-                          ),
-                      ],
-                      onChanged: (value) => setState(() {
-                        season = value!;
-                        episode = 1;
-                      }),
+                    Text(
+                      [
+                        title.kind.toUpperCase(),
+                        if (title.rating != null) 'IMDb ${title.rating}',
+                        ...title.genres.take(3),
+                      ].join('  ·  '),
+                      style: const TextStyle(color: Color(0xFFBCC8C9)),
                     ),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (
-                          var i = 1;
-                          i <=
-                              detail.seasons
-                                  .firstWhere(
-                                    (s) =>
-                                        s.number ==
-                                        (detail.seasons.any(
-                                              (s) => s.number == season,
-                                            )
-                                            ? season
-                                            : detail.seasons.first.number),
-                                  )
-                                  .episodes;
-                          i++
-                        )
-                          ChoiceChip(
-                            label: Text('$i'),
-                            selected: episode == i,
-                            onSelected: (_) => setState(() {
-                              episode = i;
-                              if (season == 0) {
-                                season = detail.seasons.first.number;
-                              }
-                            }),
-                          ),
-                      ],
+                    const SizedBox(height: 14),
+                    Text(
+                      title.description.isEmpty
+                          ? 'No synopsis available.'
+                          : title.description,
                     ),
-                  ],
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed:
-                          title.available &&
-                              (detail.seasons.isEmpty || episode > 0)
-                          ? () => play(
-                              title,
-                              offline:
-                                  saved != null && File(saved.path).existsSync()
-                                  ? saved
-                                  : null,
-                            )
-                          : null,
-                      icon: const Icon(Icons.play_arrow),
-                      label: Text(
-                        watch == null
-                            ? 'Play'
-                            : 'Continue at ${Duration(seconds: watch.positionSeconds).inMinutes} min',
+                    if (detail.seasons.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      const Text(
+                        'Episodes',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ),
-                  if (detail.seasons.isNotEmpty && episode == 0)
-                    const Text('Choose an episode to play or download.'),
-                  const SizedBox(height: 7),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed:
-                          busy ||
-                              !title.available ||
-                              (detail.seasons.isNotEmpty && episode == 0)
-                          ? null
-                          : () => download(title),
-                      icon: const Icon(Icons.download_outlined),
-                      label: const Text('Download MP4'),
-                    ),
-                  ),
-                  if (saved != null && File(saved.path).existsSync())
-                    TextButton.icon(
-                      onPressed: () => play(title, offline: saved),
-                      icon: const Icon(Icons.offline_pin),
-                      label: Text('Play downloaded ${saved.resolution}p'),
-                    ),
-                  AnimatedBuilder(
-                    animation: task,
-                    builder: (_, _) => task.active
-                        ? Column(
-                            children: [
-                              LinearProgressIndicator(
-                                value: task.total == null
-                                    ? null
-                                    : task.received / task.total!,
-                              ),
-                              Text(
-                                task.total == null
-                                    ? '${(task.received / 1048576).toStringAsFixed(1)} MB'
-                                    : '${(task.received / 1048576).toStringAsFixed(1)} / ${(task.total! / 1048576).toStringAsFixed(1)} MB',
-                              ),
-                              TextButton(
-                                onPressed: task.cancel,
-                                child: const Text('Pause download'),
-                              ),
-                            ],
+                      const SizedBox(height: 8),
+                      DropdownButton<int>(
+                        value: detail.seasons.any((s) => s.number == season)
+                            ? season
+                            : detail.seasons.first.number,
+                        items: [
+                          for (final s in detail.seasons)
+                            DropdownMenuItem(
+                              value: s.number,
+                              child: Text('Season ${s.number}'),
+                            ),
+                        ],
+                        onChanged: (value) => setState(() {
+                          season = value!;
+                          episode = 1;
+                        }),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (
+                            var i = 1;
+                            i <=
+                                detail.seasons
+                                    .firstWhere(
+                                      (s) =>
+                                          s.number ==
+                                          (detail.seasons.any(
+                                                (s) => s.number == season,
+                                              )
+                                              ? season
+                                              : detail.seasons.first.number),
+                                    )
+                                    .episodes;
+                            i++
                           )
-                        : const SizedBox.shrink(),
-                  ),
-                  if (detail.dubs.isNotEmpty) ...[
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Other audio versions',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                            ChoiceChip(
+                              label: Text('$i'),
+                              selected: episode == i,
+                              onSelected: (_) => setState(() {
+                                episode = i;
+                                if (season == 0) {
+                                  season = detail.seasons.first.number;
+                                }
+                              }),
+                            ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed:
+                            title.available &&
+                                (detail.seasons.isEmpty || episode > 0)
+                            ? () => play(
+                                title,
+                                offline:
+                                    saved != null &&
+                                        File(saved.path).existsSync()
+                                    ? saved
+                                    : null,
+                              )
+                            : null,
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(
+                          watch == null
+                              ? 'Play'
+                              : 'Continue at ${Duration(seconds: watch.positionSeconds).inMinutes} min',
+                        ),
                       ),
                     ),
-                    for (final dub in detail.dubs)
-                      ListTile(
-                        title: Text(dub.title),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () =>
-                            openTitle(context, widget.api, widget.library, dub),
+                    if (detail.seasons.isNotEmpty && episode == 0)
+                      const Text('Choose an episode to play or download.'),
+                    const SizedBox(height: 7),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            busy ||
+                                !title.available ||
+                                (detail.seasons.isNotEmpty && episode == 0)
+                            ? null
+                            : () => download(title),
+                        icon: downloadLabel == null
+                            ? const Icon(Icons.download_outlined)
+                            : const SizedBox.shrink(),
+                        label: downloadLabel == null
+                            ? const Text('Download MP4')
+                            : MovieBoxLoader(
+                                label: downloadLabel!,
+                                compact: true,
+                              ),
                       ),
+                    ),
+                    if (saved != null && File(saved.path).existsSync())
+                      TextButton.icon(
+                        onPressed: () => play(title, offline: saved),
+                        icon: const Icon(Icons.offline_pin),
+                        label: Text('Play downloaded ${saved.resolution}p'),
+                      ),
+                    AnimatedBuilder(
+                      animation: task,
+                      builder: (_, _) => task.active
+                          ? Column(
+                              children: [
+                                if (task.total == null || task.total! <= 0)
+                                  const MovieBoxLoader(
+                                    label: 'Downloading video',
+                                    compact: true,
+                                  )
+                                else
+                                  LinearProgressIndicator(
+                                    value: task.received / task.total!,
+                                  ),
+                                Text(
+                                  task.total == null
+                                      ? '${(task.received / 1048576).toStringAsFixed(1)} MB'
+                                      : '${(task.received / 1048576).toStringAsFixed(1)} / ${(task.total! / 1048576).toStringAsFixed(1)} MB',
+                                ),
+                                TextButton(
+                                  onPressed: task.cancel,
+                                  child: const Text('Pause download'),
+                                ),
+                              ],
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    if (detail.dubs.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      const Text(
+                        'Other audio versions',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      for (final dub in detail.dubs)
+                        ListTile(
+                          title: Text(dub.title),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => openTitle(
+                            context,
+                            widget.api,
+                            widget.library,
+                            dub,
+                          ),
+                        ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            FutureBuilder<MoviePage>(
-              future: widget.api.recommendations(widget.path),
-              builder: (_, result) =>
-                  result.hasData && result.data!.items.isNotEmpty
-                  ? MovieRow(
-                      'You might also like',
-                      result.data!.items,
-                      (item) =>
-                          openTitle(context, widget.api, widget.library, item),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ],
-        );
-      },
+              FutureBuilder<MoviePage>(
+                future: widget.api.recommendations(widget.path),
+                builder: (_, result) =>
+                    result.hasData && result.data!.items.isNotEmpty
+                    ? MovieRow(
+                        'You might also like',
+                        result.data!.items,
+                        (item) => openTitle(
+                          context,
+                          widget.api,
+                          widget.library,
+                          item,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          );
+        },
+      ),
     ),
   );
 }
@@ -1226,7 +1407,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         .toList()
         .reversed
         .toList();
-    final history = widget.library.history.values.toList().reversed.toList();
+    final history = latestWatchEntries(widget.library.history.values);
     return ListView(
       children: [
         const ScreenHeader('Downloads'),
@@ -1244,7 +1425,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         for (final entry in downloads)
           ListTile(
-            leading: const Icon(Icons.offline_pin_outlined),
+            leading: SizedBox(
+              width: 54,
+              height: 68,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: DownloadArtwork(title: entry.title, download: entry),
+              ),
+            ),
             title: Text(entry.title.title),
             subtitle: Text(
               '${entry.resolution}p${entry.season > 0 ? ' · S${entry.season} E${entry.episode}' : ''} · ${entry.subtitlePath != null && File(entry.subtitlePath!).existsSync() ? 'Subtitles saved' : 'No subtitles'}',
@@ -1301,7 +1489,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         for (final entry in history)
           ListTile(
-            leading: const Icon(Icons.play_circle_outline),
+            leading: SizedBox(
+              width: 54,
+              height: 68,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: DownloadArtwork(
+                  title: entry.title,
+                  download: widget.library.downloads[entry.key],
+                ),
+              ),
+            ),
             title: Text(entry.title.title),
             subtitle: Text(
               '${entry.season > 0 ? 'S${entry.season} E${entry.episode} · ' : ''}${Duration(seconds: entry.positionSeconds).inMinutes} min watched',
@@ -1414,6 +1612,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final address = TextEditingController(text: widget.library.server);
   late final token = TextEditingController(text: widget.library.token);
   bool testing = false;
+  bool saving = false;
   @override
   void dispose() {
     address.dispose();
@@ -1422,7 +1621,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> save() async {
+    if (testing) return;
     final raw = address.text.trim();
+    final accessToken = token.text.trim();
     final uri = Uri.tryParse(raw);
     if (uri == null ||
         !['http', 'https'].contains(uri.scheme) ||
@@ -1430,11 +1631,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       showError(context, 'Enter a full http:// or https:// server address.');
       return;
     }
-    setState(() => testing = true);
-    final candidate = MovieApi(baseUrl: raw, token: token.text.trim());
+    setState(() {
+      testing = true;
+      saving = false;
+    });
+    final candidate = MovieApi(baseUrl: raw, token: accessToken);
     try {
       await candidate.ping();
-      await widget.library.configure(raw, token.text.trim());
+      if (!mounted) return;
+      setState(() => saving = true);
+      await widget.library.configure(raw, accessToken);
+      if (!mounted) return;
       widget.onSaved();
       if (mounted) {
         if (widget.standalone) {
@@ -1449,7 +1656,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) showError(context, e);
     } finally {
       candidate.close();
-      if (mounted) setState(() => testing = false);
+      if (mounted) {
+        setState(() {
+          testing = false;
+          saving = false;
+        });
+      }
     }
   }
 
@@ -1477,6 +1689,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 22),
         TextField(
           controller: address,
+          enabled: !testing,
           keyboardType: TextInputType.url,
           decoration: const InputDecoration(
             labelText: 'API address',
@@ -1486,6 +1699,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 16),
         TextField(
           controller: token,
+          enabled: !testing,
           obscureText: true,
           decoration: const InputDecoration(
             labelText: 'API token (if configured)',
@@ -1494,7 +1708,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 20),
         FilledButton(
           onPressed: testing ? null : save,
-          child: Text(testing ? 'Checking connection…' : 'Connect and save'),
+          child: testing
+              ? MovieBoxLoader(
+                  label: saving ? 'Saving connection' : 'Connecting',
+                  compact: true,
+                )
+              : const Text('Connect and save'),
         ),
         const SizedBox(height: 10),
         const Text(
