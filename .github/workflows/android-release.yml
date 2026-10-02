@@ -93,11 +93,13 @@ jobs:
           keytool -exportcert -keystore "$MOVIE_BOX_KEYSTORE_PATH" \
             -storepass:env MOVIE_BOX_STORE_PASSWORD -alias "$MOVIE_BOX_KEY_ALIAS" \
             -file "$RUNNER_TEMP/release-certificate.der"
-          expected=$(sha256sum "$RUNNER_TEMP/release-certificate.der" | cut -d ' ' -f 1)
-          actual=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature.txt")
-          test "$expected" = "$actual"
+          python3 ../scripts/verify_apk_certificate.py \
+            "$RUNNER_TEMP/apk-signature.txt" "$RUNNER_TEMP/release-certificate.der"
           "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/apk-badging.txt"
-          grep -F "versionCode='$BUILD_NUMBER' versionName='$VERSION'" "$RUNNER_TEMP/apk-badging.txt"
+          if ! grep -F "versionCode='$BUILD_NUMBER' versionName='$VERSION'" "$RUNNER_TEMP/apk-badging.txt"; then
+            echo '::error::APK version does not match the requested release.'
+            exit 1
+          fi
           if grep -q '^application-debuggable' "$RUNNER_TEMP/apk-badging.txt"; then
             echo '::error::Release APK must not be debuggable.'
             exit 1
