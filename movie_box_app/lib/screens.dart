@@ -1742,7 +1742,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return widget.standalone
         ? Scaffold(
             appBar: AppBar(title: const Text('Server settings')),
-            body: content,
+            body: SafeArea(child: content),
           )
         : content;
   }

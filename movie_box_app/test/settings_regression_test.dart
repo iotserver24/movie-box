@@ -271,6 +271,36 @@ void main() {
     );
   }
 
+  testWidgets(
+    'Credits and standalone Settings respect system navigation padding',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+      tester.view.padding = const FakeViewPadding(bottom: 34);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewPadding);
+      addTearDown(tester.view.resetPadding);
+      await tester.pumpWidget(const MaterialApp(home: CreditsScreen()));
+      await tester.scrollUntilVisible(
+        find.text('Copy donation link'),
+        150,
+        scrollable: listScrollable,
+      );
+      expect(
+        tester.getBottomRight(find.byType(ListView)).dy,
+        lessThanOrEqualTo(810),
+      );
+      await mount(tester, standalone: true);
+      expect(
+        tester.getBottomRight(find.byType(ListView)).dy,
+        lessThanOrEqualTo(810),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Donate prevents duplicate launches and handles disposal', (
     tester,
   ) async {
