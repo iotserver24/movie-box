@@ -1,0 +1,106 @@
+Movie Box Source-Available License 1.0
+
+Copyright (c) 2026 R3AP3R Editz (https://github.com/iotserver24).
+Contributors retain copyright in their own contributions.
+
+1. Scope and permission
+
+"Software" means the original code and accompanying materials in this
+repository, and modifications or derivative works of those materials, except
+third-party materials governed by separate terms. "You" means any person or
+organization exercising permissions under this license.
+
+Subject to all conditions below, the copyright holders grant you a worldwide,
+non-exclusive, royalty-free license to use, reproduce, study, modify, and
+redistribute the Software in source or binary form, including hosting it for
+others without charge. Rights not expressly granted are reserved.
+
+2. Required credit and notices
+
+You must preserve this license and existing copyright, attribution, and
+third-party notices in all copies or substantial portions of the Software.
+Every distributed version or publicly hosted deployment must prominently show
+this credit, using "Based on Movie Box by R3AP3R Editz" for modified versions:
+
+    Movie Box by R3AP3R Editz
+    https://github.com/iotserver24/movie-box
+
+For an application, show this credit in an accessible About, Credits, or
+Settings screen and in its accompanying documentation. For a source-only or
+command-line distribution, show it in the README or equivalent user-facing
+documentation. Include a copy of this license with binary distributions, for
+example in bundled notices or an accessible license screen.
+
+Clearly identify modified versions and their maintainers. You may add credit
+for your own contributions, but must not remove, obscure, or replace the
+original credit or imply that the original creator endorses your version.
+
+3. No advertising
+
+You must not add, enable, or distribute advertising in the Software or its
+derivatives, or operate an ad-supported version or deployment. This includes
+advertising SDKs, banners, pop-ups, interstitials, rewarded ads, paid promotional
+placements, and affiliate promotions integrated into the Software or an access
+page operated by you for it. You must not monetize access to or distribution of
+the Software through advertising, including ad-gated download links.
+
+This condition does not apply to unrelated advertising displayed independently
+by a third-party repository host that you neither control nor receive revenue
+from. It does not authorize you to add advertisements to a project page.
+
+4. No selling or charging for access
+
+You must not sell, rent, sublicense for a fee, or otherwise charge for the
+Software or its derivatives. This prohibition includes paid downloads,
+subscriptions, paid hosted access, paywalls, paid feature unlocks, and bundling
+the Software into a paid product or service. Rebranding or modifying the
+Software does not remove these restrictions. Free use within an organization
+is permitted if all other conditions are met.
+
+5. Voluntary donations
+
+Voluntary donations are permitted if they are not required to obtain, access,
+or use the Software and provide no exclusive features, content, access, or
+advertising placement in return. Donations to the original creator can be made
+at https://ai.xibebase.in. No donation is required by this license.
+
+6. Redistribution and contributions
+
+Redistribution of the Software, including modified versions, must remain
+subject to this license. You may not relicense the covered Software or impose
+terms that remove the credit requirement or permit advertising or selling it.
+This license does not require publication of private modifications.
+
+Unless separately agreed in writing, contributions intentionally submitted for
+inclusion in this project are offered under this license. Contributors must
+have authority to submit their work and retain ownership of their contributions.
+
+7. Third-party rights
+
+This license covers only rights the copyright holders can grant. Dependencies,
+third-party code, trademarks, artwork, catalog data, films, streams, and
+subtitles remain subject to their owners' rights and applicable terms. Their
+licenses are not replaced by this license. No right to access, copy, download,
+or distribute third-party media is granted here. No trademark or endorsement
+rights are granted beyond the attribution required above.
+
+8. Termination
+
+Your permissions under this license terminate automatically if you violate its
+conditions. On termination, you must stop exercising the permissions granted
+by this license. Reinstatement requires written permission from the relevant
+copyright holders. Termination does not remove obligations that accrued before
+termination or affect recipients who remain in compliance.
+
+9. Disclaimer of warranty and limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED
+"AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR ITS USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+This is a custom source-available license, not an OSI-approved open-source
+license. Its advertising and sale restrictions intentionally limit reuse.

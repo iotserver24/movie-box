@@ -8,6 +8,7 @@ import 'api.dart';
 import 'library.dart';
 import 'loading.dart';
 import 'model.dart';
+import 'notices.dart';
 import 'player.dart';
 
 void showError(BuildContext context, Object error) {
@@ -1718,6 +1719,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 10),
         const Text(
           'Use this app and server only on a trusted network or private VPN.',
+        ),
+        const Divider(height: 32),
+        ListTile(
+          leading: const Icon(Icons.info_outline),
+          title: const Text('Credits and licenses'),
+          subtitle: const Text('Movie Box by R3AP3R Editz'),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const CreditsScreen()),
+          ),
         ),
       ],
     );
