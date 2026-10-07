@@ -64,16 +64,81 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late int season = widget.title.kind == 'movie' ? 0 : widget.season;
   late int episode = widget.title.kind == 'movie' ? 0 : widget.episode;
   bool preparingDownload = false;
+  bool preferLocal = true;
+  bool switchingPlayback = false;
+  double playbackSpeed = 1;
+  String? captionSource;
+  Duration captionOffset = Duration.zero;
+  double captionOpacity = 0.75;
+  double captionSize = 18;
+  String captionPlace = 'bottom';
+  bool captionPanel = false;
+  static const playbackSpeeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
   DownloadTask get downloadTask =>
       widget.library.taskFor(widget.title, season, episode);
 
+  SavedDownload? localDownload() {
+    final saved =
+        widget.library.downloads[viewingKey(widget.title.path, season, episode)];
+    if (saved == null || !File(saved.path).existsSync()) return null;
+    return saved;
+  }
+
+  Widget playbackMenu({required bool expanded}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextButton(
+          style: TextButton.styleFrom(
+            backgroundColor: const Color(0xCC101010),
+            foregroundColor: Colors.white,
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+          ),
+          onPressed: chooseSpeed,
+          child: Text(speedLabel),
+        ),
+        const SizedBox(width: 6),
+        TextButton(
+          style: TextButton.styleFrom(
+            backgroundColor: const Color(0xCC101010),
+            foregroundColor: Colors.white,
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+          ),
+          onPressed: chooseCaption,
+          child: Text(
+            expanded ? 'Subtitles: $captionLabel' : captionLabel,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String get speedLabel {
+    final text = playbackSpeed.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    return 'Speed ${text}x';
+  }
+
   void refreshDownloads() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final saved = preferLocal ? localDownload() : null;
+    if (saved != null &&
+        currentOffline?.path != saved.path &&
+        controller != null &&
+        !loading &&
+        !switchingPlayback) {
+      playLocal(saved);
+    }
+    setState(() {});
   }
 
   @override
   void initState() {
     super.initState();
+    captionPlace = widget.library.captionPlace;
+    captionOpacity = widget.library.captionOpacity;
+    captionSize = widget.library.captionSize;
     currentOffline = widget.offline;
     widget.library.addListener(refreshDownloads);
     widget.api
@@ -99,21 +164,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> initialize() async {
     try {
-      if (currentOffline != null) {
-        if (!await File(currentOffline!.path).exists()) {
+      final saved = preferLocal ? (localDownload() ?? currentOffline) : null;
+      if (saved != null) {
+        if (!await File(saved.path).exists()) {
           throw ApiException(
             'This download is missing. Delete it from Downloads and download it again.',
           );
         }
-        await attach(VideoPlayerController.file(File(currentOffline!.path)));
-        final path = currentOffline!.subtitlePath;
-        if (path != null && await File(path).exists()) {
-          final text = await File(path).readAsString();
-          await controller!.setClosedCaptionFile(
-            Future.value(SrtCaptions(text)),
-          );
-          captionLabel = 'Saved subtitles';
-        }
+        await playLocal(saved, resume: false);
       } else {
         playback = await widget.api.playback(
           widget.title.path,
@@ -133,6 +191,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           throw ApiException('No playable MP4 stream is available.');
         }
         await selectStream(streams.first, resume: false);
+      }
+      final ready = preferLocal ? localDownload() : null;
+      if (ready != null && currentOffline?.path != ready.path) {
+        await playLocal(ready, resume: false);
       }
       if (mounted) {
         setState(() {
@@ -182,12 +244,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
         previous.removeListener(onProgress);
         await previous.dispose();
       }
+      await next.setPlaybackSpeed(playbackSpeed);
       if (play) await next.play();
       revealControls();
       if (mounted) setState(() {});
     } catch (_) {
       await next.dispose();
       rethrow;
+    }
+  }
+
+  Future<void> playLocal(SavedDownload saved, {bool resume = true}) async {
+    if (switchingPlayback) return;
+    switchingPlayback = true;
+    try {
+      final position = resume ? controller?.value.position : null;
+      final playing = !resume || (controller?.value.isPlaying ?? true);
+      await attach(
+        VideoPlayerController.file(File(saved.path)),
+        at: position,
+        play: playing,
+      );
+      currentOffline = saved;
+      selected = null;
+      captions = [];
+      captionLabel = 'Off';
+      captionSource = null;
+      captionOffset = Duration.zero;
+      final path = saved.subtitlePath;
+      if (widget.library.captionLanguage != 'Off' &&
+          path != null &&
+          await File(path).exists()) {
+        final text = await File(path).readAsString();
+        if (mounted && controller != null) {
+          await showCaptions(text, 'Saved subtitles');
+        }
+      }
+      if (mounted) setState(() {});
+    } finally {
+      switchingPlayback = false;
     }
   }
 
@@ -204,6 +299,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     selected = stream;
     captions = [];
     captionLabel = 'Off';
+    captionSource = null;
     if (mounted) {
       setState(() {
         if (loading && loadingLabel != 'Switching quality') {
@@ -224,22 +320,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
       if (!mounted || selected != stream) return;
       captions = tracks;
+      final preferred = widget.library.captionLanguage;
+      if (preferred == 'Off') return;
       final english = tracks
           .where((item) => item.language.toLowerCase().startsWith('en'))
           .firstOrNull;
-      if (english == null) return;
+      final chosen = preferred == null
+          ? english
+          : tracks
+                    .where(
+                      (item) =>
+                          item.label == preferred ||
+                          item.language.toLowerCase() == preferred.toLowerCase(),
+                    )
+                    .firstOrNull ??
+                english;
+      if (chosen == null) return;
       final response = await http.get(
-        Uri.parse(english.url),
-        headers: english.headers,
+        Uri.parse(chosen.url),
+        headers: chosen.headers,
       );
       if (response.statusCode != 200 && response.statusCode != 206) return;
       if (!mounted || selected != stream || controller == null) return;
-      await controller!.setClosedCaptionFile(
-        Future.value(
-          SrtCaptions(utf8.decode(response.bodyBytes, allowMalformed: true)),
-        ),
+      await showCaptions(
+        utf8.decode(response.bodyBytes, allowMalformed: true),
+        chosen.label,
       );
-      if (mounted) setState(() => captionLabel = english.label);
+      if (mounted) setState(() {});
     } catch (_) {}
   }
 
@@ -306,12 +413,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       playback = null;
       captions = [];
       captionLabel = 'Off';
-      currentOffline = widget
-          .library
-          .downloads[viewingKey(widget.title.path, season, episode)];
-      if (currentOffline != null && !File(currentOffline!.path).existsSync()) {
-        currentOffline = null;
-      }
+      captionOffset = Duration.zero;
+      captionPanel = false;
+      preferLocal = true;
+      currentOffline = localDownload();
       loading = true;
       error = null;
     });
@@ -328,40 +433,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> chooseCaption() async {
+    if (captionPanel) {
+      setState(() => captionPanel = false);
+      return;
+    }
     if (loading || actionLoading != null) return;
-    final player = controller;
-    if (player == null) return;
-    if (selected == null) {
-      final path = currentOffline?.subtitlePath;
-      if (path == null || !await File(path).exists() || !mounted) return;
-      final saved = await showModalBottomSheet<bool>(
-        context: context,
-        builder: (_) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(title: Text('Subtitles')),
-              ListTile(
-                title: const Text('Off'),
-                onTap: () => Navigator.pop(context, false),
-              ),
-              ListTile(
-                title: const Text('Saved subtitles'),
-                onTap: () => Navigator.pop(context, true),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (saved == null || !mounted) return;
-      await player.setClosedCaptionFile(
-        saved
-            ? Future.value(SrtCaptions(await File(path).readAsString()))
-            : null,
-      );
-      if (mounted) {
-        setState(() => captionLabel = saved ? 'Saved subtitles' : 'Off');
+    if (controller == null) return;
+    revealControls();
+    if (currentOffline != null) {
+      final path = currentOffline!.subtitlePath;
+      final hasSaved = path != null && await File(path).exists();
+      if (!hasSaved && captions.isEmpty) {
+        try {
+          final tracks = await remoteCaptions();
+          if (mounted) captions = tracks;
+        } catch (_) {}
       }
+      if (!mounted) return;
+      setState(() => captionPanel = true);
       return;
     }
     try {
@@ -377,53 +466,273 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
       }
       if (!mounted) return;
-      final choice = await showModalBottomSheet<Object>(
-        context: context,
-        builder: (_) => SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const ListTile(title: Text('Subtitles')),
-              ListTile(
-                title: const Text('Off'),
-                onTap: () => Navigator.pop(context, false),
-              ),
-              for (final caption in captions)
-                ListTile(
-                  title: Text(caption.label),
-                  onTap: () => Navigator.pop(context, caption),
-                ),
-            ],
-          ),
-        ),
-      );
-      if (choice == null || !mounted) return;
-      if (choice == false) {
-        await player.setClosedCaptionFile(null);
-        captionLabel = 'Off';
-      } else {
-        final caption = choice as MovieCaption;
-        final response = await withLoading(
-          'Loading subtitles',
-          () => http.get(Uri.parse(caption.url), headers: caption.headers),
-        );
-        if (response.statusCode != 200 && response.statusCode != 206) {
-          throw ApiException('Subtitles returned HTTP ${response.statusCode}.');
-        }
-        await player.setClosedCaptionFile(
-          Future.value(
-            SrtCaptions(utf8.decode(response.bodyBytes, allowMalformed: true)),
-          ),
-        );
-        captionLabel = caption.label;
-      }
-      if (mounted) setState(() {});
+      setState(() => captionPanel = true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('$e')));
       }
     }
+  }
+
+  Future<void> pickCaption(Object choice) async {
+    setState(() => captionPanel = false);
+    final player = controller;
+    if (player == null || !mounted) return;
+    final path = currentOffline?.subtitlePath;
+    if (choice == true && path != null) {
+      await showCaptions(
+        await File(path).readAsString(),
+        'Saved subtitles',
+        remember: true,
+      );
+    } else if (choice is MovieCaption) {
+      await applyRemoteCaption(player, choice, remember: true);
+    } else {
+      await showCaptions(null, 'Off', remember: true);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<List<MovieCaption>> remoteCaptions() async {
+    playback ??= await widget.api.playback(widget.title.path, season, episode);
+    final stream = playback!.streams
+        .where((item) => item.format.toUpperCase() == 'MP4' && !item.locked)
+        .firstOrNull;
+    if (stream == null) return [];
+    return widget.api.captions(widget.title.path, stream.id, season, episode);
+  }
+
+  Future<void> applyRemoteCaption(
+    VideoPlayerController player,
+    MovieCaption caption, {
+    bool remember = false,
+  }) async {
+    final response = await withLoading(
+      'Loading subtitles',
+      () => http.get(Uri.parse(caption.url), headers: caption.headers),
+    );
+    if (response.statusCode != 200 && response.statusCode != 206) {
+      throw ApiException('Subtitles returned HTTP ${response.statusCode}.');
+    }
+    await showCaptions(
+      utf8.decode(response.bodyBytes, allowMalformed: true),
+      caption.label,
+      remember: remember,
+    );
+  }
+
+  Future<void> showCaptions(
+    String? source,
+    String label, {
+    bool remember = false,
+  }) async {
+    captionSource = source;
+    captionLabel = label;
+    if (remember) await widget.library.saveCaptionLanguage(label);
+    await refreshCaptionFile();
+  }
+
+  Future<void> rememberCaptionStyle() => widget.library.saveCaptionStyle(
+    place: captionPlace,
+    opacity: captionOpacity,
+    size: captionSize,
+  );
+
+  Future<void> refreshCaptionFile() async {
+    final player = controller;
+    if (player == null) return;
+    if (captionSource == null) {
+      await player.setClosedCaptionFile(null);
+      return;
+    }
+    final shifted = [
+      for (final caption in SrtCaptions.parse(captionSource!))
+        Caption(
+          number: caption.number,
+          start: caption.start + captionOffset,
+          end: caption.end + captionOffset,
+          text: caption.text,
+        ),
+    ];
+    await player.setClosedCaptionFile(Future.value(FixedCaptions(shifted)));
+  }
+
+  String get captionOffsetLabel {
+    final seconds = captionOffset.inMilliseconds / 1000;
+    final sign = seconds > 0 ? '+' : '';
+    return '$sign${seconds.toStringAsFixed(1)}s';
+  }
+
+  Object _captionChoice(bool hasSaved) {
+    if (captionLabel == 'Saved subtitles' && hasSaved) return true;
+    for (final caption in captions) {
+      if (caption.label == captionLabel) return caption;
+    }
+    return false;
+  }
+
+  Widget captionSidePanel() {
+    final savedPath = currentOffline?.subtitlePath;
+    final hasSaved = savedPath != null && File(savedPath).existsSync();
+    return Material(
+      color: const Color(0xF0101519),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+            ListTile(
+              title: const Text('Subtitles'),
+              trailing: IconButton(
+                tooltip: 'Close subtitles',
+                onPressed: () => setState(() => captionPanel = false),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+            const ListTile(title: Text('Position')),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Wrap(
+                spacing: 4,
+                children: [
+                  for (final place in ['top', 'middle', 'bottom'])
+                    ChoiceChip(
+                      label: Text(place[0].toUpperCase() + place.substring(1)),
+                      selected: captionPlace == place,
+                      onSelected: (_) {
+                        setState(() => captionPlace = place);
+                        rememberCaptionStyle();
+                      },
+                    ),
+                ],
+              ),
+            ),
+            ListTile(
+              title: const Text('Timing'),
+              subtitle: Text(
+                captionOffset == Duration.zero
+                    ? 'In sync'
+                    : 'Subtitles ${captionOffset.isNegative ? 'earlier' : 'later'} by ${captionOffsetLabel.replaceFirst('-', '')}',
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: 'Subtitles earlier',
+                  onPressed: () async {
+                    captionOffset -= const Duration(milliseconds: 500);
+                    await refreshCaptionFile();
+                    if (mounted) setState(() {});
+                  },
+                  icon: const Icon(Icons.remove),
+                ),
+                Text(captionOffsetLabel),
+                IconButton(
+                  tooltip: 'Subtitles later',
+                  onPressed: () async {
+                    captionOffset += const Duration(milliseconds: 500);
+                    await refreshCaptionFile();
+                    if (mounted) setState(() {});
+                  },
+                  icon: const Icon(Icons.add),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Text(
+                'Background',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            Slider(
+              value: captionOpacity,
+              onChanged: (value) {
+                setState(() => captionOpacity = value);
+                rememberCaptionStyle();
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'Text size',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            Slider(
+              min: 14,
+              max: 32,
+              value: captionSize,
+              onChanged: (value) {
+                setState(() => captionSize = value);
+                rememberCaptionStyle();
+              },
+            ),
+            const ListTile(title: Text('Language')),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: DropdownButton<Object>(
+                isExpanded: true,
+                value: _captionChoice(hasSaved),
+                items: [
+                  const DropdownMenuItem(value: false, child: Text('Off')),
+                  if (hasSaved)
+                    const DropdownMenuItem(
+                      value: true,
+                      child: Text('Saved subtitles'),
+                    ),
+                  for (final caption in captions)
+                    DropdownMenuItem(
+                      value: caption,
+                      child: Text(caption.label),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) pickCaption(value);
+                },
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: Text(
+                'Position, background, text size, and language are kept for every video. Timing is only for this one.',
+                style: TextStyle(fontSize: 12, color: Color(0xFFBCC8C9)),
+              ),
+            ),
+          ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> chooseSpeed() async {
+    if (loading || actionLoading != null || controller == null) return;
+    final choice = await showModalBottomSheet<double>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(title: Text('Playback speed')),
+            for (final speed in playbackSpeeds)
+              ListTile(
+                title: Text(speed == 1 ? '1x' : '${speed}x'),
+                trailing: speed == playbackSpeed
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () => Navigator.pop(context, speed),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted || controller == null) return;
+    await controller!.setPlaybackSpeed(choice);
+    setState(() => playbackSpeed = choice);
   }
 
   Future<void> chooseQuality() async {
@@ -482,6 +791,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       playback = fresh;
       if (mounted) {
         setState(() {
+          preferLocal = false;
           currentOffline = null;
           error = null;
         });
@@ -768,6 +1078,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       child: VideoPlayer(player),
                     ),
                   ),
+                  if (controlsVisible)
+                    const Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 128,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Color(0x00000000), Color(0xE6101010)],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   Positioned.fill(
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
@@ -785,21 +1113,52 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       },
                     ),
                   ),
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: controlsVisible
-                        ? (expandedControls ? panelHeight + 8 : 54)
-                        : 10,
-                    child: ClosedCaption(
-                      text: player.value.caption.text,
-                      textStyle: const TextStyle(
-                        fontSize: 18,
-                        color: Colors.white,
-                        backgroundColor: Color(0xC0000000),
+                  if (player.value.caption.text.isNotEmpty)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Align(
+                          alignment: switch (captionPlace) {
+                            'top' => Alignment.topCenter,
+                            'middle' => Alignment.center,
+                            _ => Alignment.bottomCenter,
+                          },
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              16,
+                              controlsVisible ? 56 : 16,
+                              16,
+                              controlsVisible ? 72 : 16,
+                            ),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Color.fromARGB(
+                                  (captionOpacity * 255).round(),
+                                  0,
+                                  0,
+                                  0,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                child: Text(
+                                  player.value.caption.text,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: captionSize,
+                                    color: Colors.white,
+                                    height: 1.25,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
                   if (controlsVisible) ...[
                     Positioned.fill(
                       top: expandedControls ? 56 : 0,
@@ -815,7 +1174,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           const SizedBox(width: 22),
                           IconButton(
                             tooltip: player.value.isPlaying ? 'Pause' : 'Play',
-                            iconSize: 48,
+                            iconSize: 42,
+                            style: IconButton.styleFrom(
+                              backgroundColor: const Color(0xFFF2B86B),
+                              foregroundColor: const Color(0xFF1A1208),
+                            ),
                             icon: Icon(
                               player.value.isPlaying
                                   ? Icons.pause_circle
@@ -872,6 +1235,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                       ),
                   ],
+                  if (controlsVisible && player.value.isInitialized)
+                    Positioned(
+                      top: expandedControls ? 72 : 8,
+                      right: 8,
+                      child: playbackMenu(expanded: expandedControls),
+                    ),
                   Positioned(
                     top: expandedControls && controlsVisible ? 56 : 12,
                     left: 12,
@@ -1179,19 +1548,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          OutlinedButton(
-                                            onPressed:
-                                                currentOffline != null &&
-                                                    currentOffline!
-                                                            .subtitlePath ==
-                                                        null
-                                                ? null
-                                                : chooseCaption,
-                                            child: Text(
-                                              'Subtitles: $captionLabel',
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
                                         ],
                                         OutlinedButton.icon(
                                           onPressed:
@@ -1344,9 +1700,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-          body: expandedControls
-              ? expandedPlayer(player, info)
-              : SafeArea(
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: expandedControls
+                    ? expandedPlayer(player, info)
+                    : SafeArea(
                   top: false,
                   child: ListView(
                     children: [
@@ -1398,41 +1757,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         padding: const EdgeInsets.all(18),
                         child: DownloadControls(task: downloadTask),
                       ),
-                      if (currentOffline == null &&
-                          player != null &&
-                          player.value.isInitialized)
+                      if (player != null && player.value.isInitialized)
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 18),
-                          child: Row(
+                          padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
                             children: [
-                              OutlinedButton.icon(
-                                onPressed: chooseQuality,
-                                icon: const Icon(Icons.high_quality),
-                                label: Text(
-                                  'Quality ${selected?.resolution ?? ''}p',
+                              if (currentOffline == null)
+                                OutlinedButton.icon(
+                                  onPressed: chooseQuality,
+                                  icon: const Icon(Icons.high_quality),
+                                  label: Text(
+                                    'Quality ${selected?.resolution ?? ''}p',
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              OutlinedButton.icon(
-                                onPressed: chooseCaption,
-                                icon: const Icon(Icons.closed_caption_outlined),
-                                label: Text(captionLabel),
-                              ),
                             ],
-                          ),
-                        ),
-                      if (currentOffline?.subtitlePath != null &&
-                          player != null &&
-                          player.value.isInitialized)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 18),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: OutlinedButton.icon(
-                              onPressed: chooseCaption,
-                              icon: const Icon(Icons.closed_caption_outlined),
-                              label: Text(captionLabel),
-                            ),
                           ),
                         ),
                       Padding(
@@ -1503,6 +1843,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ],
                   ),
                 ),
+              ),
+              if (captionPanel) ...[
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => captionPanel = false),
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: () {
+                    final width = MediaQuery.sizeOf(context).width;
+                    final preferred = width * 0.3;
+                    return preferred < 220
+                        ? (width < 220 ? width : 220.0)
+                        : preferred;
+                  }(),
+                  child: captionSidePanel(),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -1514,6 +1878,12 @@ String formatTime(Duration value) {
   final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
   final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
   return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+}
+
+class FixedCaptions extends ClosedCaptionFile {
+  @override
+  final List<Caption> captions;
+  FixedCaptions(this.captions);
 }
 
 class SrtCaptions extends ClosedCaptionFile {

@@ -219,6 +219,18 @@ class _Fixture {
 VideoPlayerController _controller(WidgetTester tester) =>
     tester.widget<VideoPlayer>(find.byType(VideoPlayer)).controller;
 
+Future<void> _chooseSubtitle(WidgetTester tester, String label) async {
+  final menu = find.byType(DropdownButton<Object>);
+  await tester.scrollUntilVisible(
+    menu,
+    120,
+    scrollable: find.byType(Scrollable).last,
+  );
+  await tester.tap(menu);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label).last);
+}
+
 Future<void> _until(WidgetTester tester, bool Function() ready) async {
   for (var i = 0; i < 80; i++) {
     await tester.pump(const Duration(milliseconds: 20));
@@ -1084,17 +1096,13 @@ void main() {
         await tester.tap(control);
         await _until(
           tester,
-          () => find.widgetWithText(ListTile, selection).evaluate().isNotEmpty,
+          () => find.text('Language').evaluate().isNotEmpty,
         );
         await tester.pumpAndSettle();
         expect(find.text('Subtitles'), findsOneWidget);
-        expect(find.widgetWithText(ListTile, 'Off'), findsOneWidget);
-        expect(
-          find.widgetWithText(ListTile, 'Saved subtitles'),
-          findsOneWidget,
-        );
+        expect(find.byType(DropdownButton<Object>), findsOneWidget);
         expect(tester.takeException(), isNull);
-        await tester.tap(find.widgetWithText(ListTile, selection));
+        await _chooseSubtitle(tester, selection);
         await _until(
           tester,
           () => find.text('Subtitles: $selection').evaluate().isNotEmpty,
@@ -1542,22 +1550,19 @@ void main() {
         await tester.tap(find.text('Subtitles: Saved subtitles'));
         await _until(
           tester,
-          () => find.widgetWithText(ListTile, 'Off').evaluate().isNotEmpty,
+          () => find.text('Language').evaluate().isNotEmpty,
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(ListTile, 'Off'));
+        await _chooseSubtitle(tester, 'Off');
         await tester.pumpAndSettle();
         expect(find.text('Subtitles: Off'), findsOneWidget);
         await tester.tap(find.text('Subtitles: Off'));
         await _until(
           tester,
-          () => find
-              .widgetWithText(ListTile, 'Saved subtitles')
-              .evaluate()
-              .isNotEmpty,
+          () => find.text('Language').evaluate().isNotEmpty,
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(ListTile, 'Saved subtitles'));
+        await _chooseSubtitle(tester, 'Saved subtitles');
         await _until(
           tester,
           () => find.text('Subtitles: Saved subtitles').evaluate().isNotEmpty,
@@ -1621,10 +1626,10 @@ void main() {
     await tester.tap(button);
     await _until(
       tester,
-      () => find.widgetWithText(ListTile, 'Off').evaluate().isNotEmpty,
+      () => find.text('Language').evaluate().isNotEmpty,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, 'Off'));
+    await _chooseSubtitle(tester, 'Off');
     await tester.pumpAndSettle();
     await _controller(tester).seekTo(const Duration(seconds: 2));
     expect(_controller(tester).value.caption.text, isEmpty);
@@ -1640,13 +1645,10 @@ void main() {
     );
     await _until(
       tester,
-      () => find
-          .widgetWithText(ListTile, 'Saved subtitles')
-          .evaluate()
-          .isNotEmpty,
+      () => find.text('Language').evaluate().isNotEmpty,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListTile, 'Saved subtitles'));
+    await _chooseSubtitle(tester, 'Saved subtitles');
     await _until(
       tester,
       () => _controller(tester).value.caption.text.isNotEmpty,
@@ -1879,4 +1881,51 @@ void main() {
       expect(find.text('Quality 1080p'), findsOneWidget);
     },
   );
+
+  testWidgets('a saved episode plays from disk even when opened as a stream', (
+    tester,
+  ) async {
+    await fixture.library.addDownload(fixture.saved(1, 2));
+    await _mountScreen(
+      tester,
+      PlayerScreen(
+        api: fixture.api,
+        library: fixture.library,
+        title: fixture.title,
+        season: 1,
+        episode: 2,
+      ),
+    );
+    await _until(
+      tester,
+      () =>
+          find.byType(VideoPlayer).evaluate().isNotEmpty &&
+          find.textContaining('Saved subtitles').evaluate().isNotEmpty,
+    );
+    await tester.pump();
+    expect(
+      fixture.platform.sources[_controller(tester).playerId]!.sourceType,
+      DataSourceType.file,
+    );
+    expect(fixture.playbackRequests, isEmpty);
+    expect(find.text('Subtitles: Saved subtitles'), findsOneWidget);
+  });
+
+  testWidgets('playback speed can be changed while a download is playing', (
+    tester,
+  ) async {
+    await _mount(
+      tester,
+      fixture,
+      size: const Size(390, 844),
+      offline: fixture.saved(1, 2, subtitles: false),
+    );
+    await tester.tap(find.text('Speed 1x'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, '1.5x'));
+    await tester.pumpAndSettle();
+    expect(_controller(tester).value.playbackSpeed, 1.5);
+    expect(find.text('Speed 1.5x'), findsOneWidget);
+    expect(find.text('Off'), findsWidgets);
+  });
 }

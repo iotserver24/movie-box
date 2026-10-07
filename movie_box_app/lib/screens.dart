@@ -996,6 +996,8 @@ class _DetailScreenState extends State<DetailScreen> {
   int season = 0, episode = 0;
   bool busy = false;
   String? downloadLabel;
+  bool showEpisodeSearch = false;
+  final episodeSearch = TextEditingController();
   @override
   void initState() {
     super.initState();
@@ -1023,8 +1025,44 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   void dispose() {
+    episodeSearch.dispose();
     widget.library.removeListener(refreshDownloads);
     super.dispose();
+  }
+
+  List<(int, int)> visibleEpisodes(MovieDetail detail) {
+    final selectedSeason = detail.seasons.any((item) => item.number == season)
+        ? season
+        : detail.seasons.first.number;
+    final all = [
+      for (final item in detail.seasons)
+        for (var number = 1; number <= item.episodes; number++)
+          (item.number, number),
+    ];
+    final query = episodeSearch.text.trim().toLowerCase();
+    if (!showEpisodeSearch || query.isEmpty) {
+      return all.where((item) => item.$1 == selectedSeason).toList();
+    }
+    final explicit = RegExp(
+      r's(?:eason)?\s*(\d+)\s*e(?:p(?:isode)?)?\s*(\d+)',
+    ).firstMatch(query);
+    if (explicit != null) {
+      final wantedSeason = int.parse(explicit.group(1)!);
+      final wantedEpisode = int.parse(explicit.group(2)!);
+      return all
+          .where(
+            (item) => item.$1 == wantedSeason && item.$2 == wantedEpisode,
+          )
+          .toList();
+    }
+    final number = int.tryParse(query);
+    if (number != null) {
+      return all.where((item) => item.$2 == number).toList();
+    }
+    return all.where((item) {
+      final label = 'season ${item.$1} episode ${item.$2}';
+      return label.contains(query);
+    }).toList();
   }
 
   Future<void> play(MovieTitle title, {SavedDownload? offline}) async {
@@ -1212,65 +1250,6 @@ class _DetailScreenState extends State<DetailScreen> {
                           ? 'No synopsis available.'
                           : title.description,
                     ),
-                    if (detail.seasons.isNotEmpty) ...[
-                      const SizedBox(height: 20),
-                      const Text(
-                        'Episodes',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButton<int>(
-                        value: detail.seasons.any((s) => s.number == season)
-                            ? season
-                            : detail.seasons.first.number,
-                        items: [
-                          for (final s in detail.seasons)
-                            DropdownMenuItem(
-                              value: s.number,
-                              child: Text('Season ${s.number}'),
-                            ),
-                        ],
-                        onChanged: (value) => setState(() {
-                          season = value!;
-                          episode = 1;
-                        }),
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (
-                            var i = 1;
-                            i <=
-                                detail.seasons
-                                    .firstWhere(
-                                      (s) =>
-                                          s.number ==
-                                          (detail.seasons.any(
-                                                (s) => s.number == season,
-                                              )
-                                              ? season
-                                              : detail.seasons.first.number),
-                                    )
-                                    .episodes;
-                            i++
-                          )
-                            ChoiceChip(
-                              label: Text('$i'),
-                              selected: episode == i,
-                              onSelected: (_) => setState(() {
-                                episode = i;
-                                if (season == 0) {
-                                  season = detail.seasons.first.number;
-                                }
-                              }),
-                            ),
-                        ],
-                      ),
-                    ],
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
@@ -1326,6 +1305,95 @@ class _DetailScreenState extends State<DetailScreen> {
                         label: Text('Play downloaded ${saved.resolution}p'),
                       ),
                     DownloadControls(task: task),
+                    if (detail.seasons.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Episodes',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Find episode',
+                            icon: Icon(
+                              showEpisodeSearch ? Icons.close : Icons.search,
+                            ),
+                            onPressed: () => setState(() {
+                              showEpisodeSearch = !showEpisodeSearch;
+                              if (!showEpisodeSearch) episodeSearch.clear();
+                            }),
+                          ),
+                        ],
+                      ),
+                      if (showEpisodeSearch)
+                        TextField(
+                          controller: episodeSearch,
+                          keyboardType: TextInputType.text,
+                          decoration: const InputDecoration(
+                            hintText: 'Episode number, or S2 E4',
+                            prefixIcon: Icon(Icons.search),
+                            isDense: true,
+                          ),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      const SizedBox(height: 8),
+                      DropdownButton<int>(
+                        value: detail.seasons.any((s) => s.number == season)
+                            ? season
+                            : detail.seasons.first.number,
+                        items: [
+                          for (final s in detail.seasons)
+                            DropdownMenuItem(
+                              value: s.number,
+                              child: Text('Season ${s.number}'),
+                            ),
+                        ],
+                        onChanged: (value) => setState(() {
+                          season = value!;
+                          episode = 1;
+                        }),
+                      ),
+                      Builder(
+                        builder: (context) {
+                          final matches = visibleEpisodes(detail);
+                          final searching =
+                              showEpisodeSearch &&
+                              episodeSearch.text.trim().isNotEmpty;
+                          if (matches.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text('No episode matches that.'),
+                            );
+                          }
+                          return Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final item in matches)
+                                ChoiceChip(
+                                  label: Text(
+                                    searching
+                                        ? 'S${item.$1} E${item.$2}'
+                                        : '${item.$2}',
+                                  ),
+                                  selected:
+                                      episode == item.$2 &&
+                                      season == item.$1,
+                                  onSelected: (_) => setState(() {
+                                    season = item.$1;
+                                    episode = item.$2;
+                                  }),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
                     if (detail.dubs.isNotEmpty) ...[
                       const SizedBox(height: 18),
                       const Text(

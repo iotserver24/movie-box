@@ -84,6 +84,36 @@ class MovieLibrary extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  String get captionPlace {
+    final value = prefs.getString('caption_place');
+    return value == 'top' || value == 'middle' || value == 'bottom'
+        ? value!
+        : 'bottom';
+  }
+
+  double get captionOpacity =>
+      (prefs.getDouble('caption_opacity') ?? 0.75).clamp(0.0, 1.0).toDouble();
+
+  double get captionSize =>
+      (prefs.getDouble('caption_size') ?? 18).clamp(14.0, 32.0).toDouble();
+
+  /// Last chosen track label, including "Off". Null until the user picks one.
+  String? get captionLanguage => prefs.getString('caption_language');
+
+  Future<void> saveCaptionStyle({
+    required String place,
+    required double opacity,
+    required double size,
+  }) async {
+    await prefs.setString('caption_place', place);
+    await prefs.setDouble('caption_opacity', opacity);
+    await prefs.setDouble('caption_size', size);
+  }
+
+  Future<void> saveCaptionLanguage(String label) async {
+    await prefs.setString('caption_language', label);
+  }
+
   Future<void> configure(String address, String apiToken) async {
     server = address.replaceAll(RegExp(r'/$'), '');
     token = apiToken;
