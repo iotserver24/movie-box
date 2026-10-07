@@ -81,15 +81,17 @@ def _resolve(values: list, index: int, depth: int = 0):
     return value
 
 
-def _nuxt_search(html: str) -> tuple[list[dict], bool]:
+def _nuxt_search(html: str) -> tuple[list[dict], dict]:
     values = _nuxt_values(html)
     for value in values:
         if isinstance(value, dict) and "items" in value and "pager" in value:
             items = _resolve(values, value["items"])
+            pager = _resolve(values, value["pager"])
+            pager = pager if isinstance(pager, dict) else {}
             if items and isinstance(items[0], dict) and "subjectId" in items[0]:
-                return items, True
+                return items, pager
             if items == []:
-                return [], True
+                return [], pager
     raise ProviderError("Search result format changed")
 
 
@@ -98,6 +100,7 @@ class MovieBoxProvider:
         self.client = client or httpx.Client(base_url=BASE_URL, timeout=20, follow_redirects=True)
         self.cache_seconds = cache_seconds
         self._cache: dict[str, tuple[float, object]] = {}
+        self._subjects: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._guest_token_value: str | None = None
         self.headers = {"Referer": f"{BASE_URL}/", "User-Agent": "Mozilla/5.0", "X-Request-Lang": "en"}
@@ -229,24 +232,62 @@ class MovieBoxProvider:
             self._guest_token_value = token
             return token
 
+    def _api_search(self, keyword: str, page: int) -> Page:
+        for attempt in range(2):
+            try:
+                token = self._guest_token()
+                data = self._data("/subject/search", body={"keyword": keyword, "page": page, "perPage": 28, "subjectType": 0}, referer=f"{BASE_URL}/newWeb/searchResult?keyword={quote(keyword)}", extra_headers={"Authorization": f"Bearer {token}"})
+                pager = data.get("pager") or {}
+                for raw in data.get("items") or []:
+                    self._remember(raw)
+                return Page(items=[_title(x) for x in data.get("items") or []], page=page, next_page=_number(pager.get("nextPage")) if pager.get("hasMore") else None, has_more=bool(pager.get("hasMore")))
+            except ProviderError:
+                if attempt:
+                    raise
+                with self._lock:
+                    self._guest_token_value = None
+                    self.client.cookies.clear()
+        raise ProviderError("Search unavailable")
+
+    def _rendered_search(self, keyword: str) -> tuple[list[dict], dict] | None:
+        try:
+            response = self._request("GET", "/newWeb/searchResult", params={"keyword": keyword})
+            return _nuxt_search(response.text)
+        except ProviderError:
+            return None
+
     def search(self, keyword: str, page: int = 1) -> Page:
         def load():
-            for attempt in range(2):
-                try:
-                    token = self._guest_token()
-                    data = self._data("/subject/search", body={"keyword": keyword, "page": page, "perPage": 28, "subjectType": 0}, referer=f"{BASE_URL}/newWeb/searchResult?keyword={quote(keyword)}", extra_headers={"Authorization": f"Bearer {token}"})
-                    pager = data.get("pager") or {}
-                    return Page(items=[_title(x) for x in data.get("items") or []], page=page, next_page=_number(pager.get("nextPage")) if pager.get("hasMore") else None, has_more=bool(pager.get("hasMore")))
-                except ProviderError:
-                    if attempt:
-                        if page == 1:
-                            response = self._request("GET", "/newWeb/searchResult", params={"keyword": keyword})
-                            items, _ = _nuxt_search(response.text)
-                            return Page(items=[_title(x) for x in items], page=1, has_more=False)
-                        raise
-                    with self._lock:
-                        self._guest_token_value = None
-                        self.client.cookies.clear()
+            # The website's first page is server-rendered and includes multi-season
+            # series the JSON search omits (for example Mr. Robot). Later pages still
+            # come from the JSON search, which is what the site uses to paginate.
+            rendered = self._rendered_search(keyword) if page == 1 else None
+            try:
+                api_page = self._api_search(keyword, page)
+            except ProviderError:
+                if not rendered or not rendered[0]:
+                    raise
+                api_page = None
+            if rendered and rendered[0]:
+                seen = set()
+                merged = []
+                for raw in rendered[0]:
+                    self._remember(raw)
+                    title = _title(raw)
+                    if title.id and title.id not in seen:
+                        seen.add(title.id)
+                        merged.append(title)
+                if api_page:
+                    for title in api_page.items:
+                        if title.id not in seen:
+                            seen.add(title.id)
+                            merged.append(title)
+                    return Page(items=merged, page=1, next_page=api_page.next_page, has_more=api_page.has_more)
+                pager = rendered[1]
+                has_more = bool(pager.get("hasMore"))
+                return Page(items=merged, page=1, next_page=_number(pager.get("nextPage")) if has_more else None, has_more=has_more)
+            if api_page:
+                return api_page
             raise ProviderError("Search unavailable")
         return self._cached(f"search:{keyword.casefold()}:{page}", load)
 
@@ -258,12 +299,62 @@ class MovieBoxProvider:
         data = self._cached("popular_searches", lambda: self._data("/subject/everyone-search"))
         return [x["title"] for x in data.get("everyoneSearch") or [] if x.get("title")]
 
+    def _remember(self, raw: dict):
+        path = raw.get("detailPath") or ""
+        if path and raw.get("subjectId"):
+            with self._lock:
+                self._subjects[path] = raw
+
+    def _play_data(self, detail_path: str, subject_id: str, season: int, episode: int) -> dict:
+        params = {"se": season, "ep": episode, "detailPath": detail_path, "streamSignType": 1, "supportCodecs[h264]": 1}
+        if subject_id:
+            params["subjectId"] = subject_id
+        return self._data("/subject/play", params=params, referer=f"{BASE_URL}/movies/{detail_path}")
+
+    def _has_streams(self, data: dict) -> bool:
+        return any(item.get("url") for item in (data.get("streams") or []) + (data.get("dash") or []) + (data.get("hls") or []))
+
+    def _probe_seasons(self, detail_path: str, subject_id: str) -> list[Season]:
+        seasons = []
+        for number in range(1, 21):
+            opening = self._play_data(detail_path, subject_id, number, 1)
+            if not self._has_streams(opening):
+                break
+            resolutions = sorted({int(item["resolutions"]) for item in (opening.get("streams") or []) if str(item.get("resolutions") or "").isdigit()})
+            low = high = 1
+            while high < 40:
+                nxt = min(high * 2, 40)
+                if not self._has_streams(self._play_data(detail_path, subject_id, number, nxt)):
+                    low = high
+                    high = nxt - 1
+                    break
+                low = high = nxt
+            while low < high:
+                mid = (low + high + 1) // 2
+                if self._has_streams(self._play_data(detail_path, subject_id, number, mid)):
+                    low = mid
+                else:
+                    high = mid - 1
+            seasons.append(Season(number=number, episode_count=low, resolutions=resolutions))
+        return seasons
+
     def detail(self, detail_path: str) -> Detail:
         if not re.fullmatch(r"[a-zA-Z0-9-]{1,160}", detail_path):
             raise ProviderError("Invalid detail path", 422)
 
         def load():
-            data = self._data("/detail", params={"detailPath": detail_path})
+            try:
+                data = self._data("/detail", params={"detailPath": detail_path})
+            except ProviderError as exc:
+                if exc.status != 404:
+                    raise
+                with self._lock:
+                    subject = self._subjects.get(detail_path)
+                if not subject:
+                    raise
+                title = _title(subject)
+                seasons = [] if title.kind == "movie" else self._probe_seasons(detail_path, title.id)
+                return Detail(title=title, cast=[], seasons=seasons, dubs=[], trailer_url=None)
             subject = data.get("subject")
             if not subject:
                 raise ProviderError("Title not found", 404)

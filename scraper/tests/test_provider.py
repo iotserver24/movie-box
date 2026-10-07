@@ -55,8 +55,8 @@ def test_search_server_rendered_data():
     import scraper.provider as module
     values = [None, {"pager": 2, "items": 3}, {"hasMore": 5}, [4], {"subjectId": 6, "subjectType": 7, "title": 8, "detailPath": 9}, True, "123", 1, "Example Movie", "example-movie-abc"]
     html = f'<script type="application/json" id="__NUXT_DATA__">{json.dumps(values)}</script>'
-    items, found = module._nuxt_search(html)
-    assert found and items[0]["subjectId"] == "123"
+    items, pager = module._nuxt_search(html)
+    assert pager.get("hasMore") is True and items[0]["subjectId"] == "123"
     assert module._title(items[0]).title == "Example Movie"
     with pytest.raises(ProviderError):
         module._nuxt_search("no data")
@@ -80,6 +80,51 @@ def test_paginated_search_with_anonymous_session():
     assert service.search("Example", 2) is result
 
 
+def test_search_page_includes_series_missing_from_json_search():
+    rendered = [None, {"pager": 2, "items": 3}, {"hasMore": 5, "nextPage": 6}, [4], {"subjectId": 7, "subjectType": 8, "title": 9, "detailPath": 10}, True, "2", "456", 2, "Mr. Robot S1-S4", "mr-robot-abc"]
+    html = f'<script id="__NUXT_DATA__">{json.dumps(rendered)}</script>'
+
+    def handler(request):
+        if request.url.path == "/newWeb/searchResult":
+            return httpx.Response(200, text=html)
+        if request.url.path.endswith("/subject/trending"):
+            return httpx.Response(200, headers={"x-user": json.dumps({"token": "guest-token"})}, json={"code": 0, "data": {}})
+        if request.url.path.endswith("/subject/search"):
+            return httpx.Response(200, json={"code": 0, "data": {"items": [SUBJECT], "pager": {"hasMore": True, "nextPage": "2"}}})
+        raise AssertionError(request.url)
+
+    service = MovieBoxProvider(httpx.Client(base_url="https://themoviebox.xyz", transport=httpx.MockTransport(handler)))
+    result = service.search("Mr. Robot")
+    assert [item.title for item in result.items] == ["Mr. Robot S1-S4", "Example Movie"]
+    assert result.has_more and result.next_page == 2
+
+
+def test_detail_probes_seasons_when_provider_has_no_detail():
+    series = {**SERIES, "detailPath": "mr-robot-abc"}
+
+    def handler(request):
+        if request.url.path == "/newWeb/searchResult":
+            return httpx.Response(404)
+        if request.url.path.endswith("/subject/trending"):
+            return httpx.Response(200, headers={"x-user": json.dumps({"token": "guest-token"})}, json={"code": 0, "data": {}})
+        if request.url.path.endswith("/subject/search"):
+            return httpx.Response(200, json={"code": 0, "data": {"items": [series], "pager": {"hasMore": False}}})
+        if request.url.path.endswith("/detail"):
+            return httpx.Response(404, json={"code": 404, "message": "subject not found"})
+        if request.url.path.endswith("/subject/play"):
+            season = int(request.url.params["se"])
+            episode = int(request.url.params["ep"])
+            streams = [{"id": "video-1", "format": "MP4", "resolutions": "720", "url": "https://cdn.test/ep.mp4"}] if season == 1 and episode <= 10 else []
+            return httpx.Response(200, json={"code": 0, "data": {"streams": streams, "dash": [], "hls": []}})
+        raise AssertionError(request.url)
+
+    service = MovieBoxProvider(httpx.Client(base_url="https://themoviebox.xyz", transport=httpx.MockTransport(handler)))
+    assert service.search("Mr. Robot").items[0].detail_path == "mr-robot-abc"
+    detail = service.detail("mr-robot-abc")
+    assert [(season.number, season.episode_count) for season in detail.seasons] == [(1, 10)]
+    assert detail.seasons[0].resolutions == [720]
+
+
 def test_search_fallback_when_anonymous_session_is_unavailable():
     values = [None, {"pager": 2, "items": 3}, {"hasMore": 4}, [5], False, {"subjectId": 6, "subjectType": 7, "title": 8, "detailPath": 9}, "123", 1, "Example Movie", "example-movie-abc"]
     html = f'<script id="__NUXT_DATA__">{json.dumps(values)}</script>'
@@ -96,7 +141,7 @@ def test_search_fallback_when_anonymous_session_is_unavailable():
     service = MovieBoxProvider(httpx.Client(base_url="https://themoviebox.xyz", transport=httpx.MockTransport(handler)))
     result = service.search("Example")
     assert result.items[0].id == "123" and not result.has_more
-    assert calls == ["/wefeed-h5api-bff/subject/trending"] * 2 + ["/newWeb/searchResult"]
+    assert calls == ["/newWeb/searchResult", "/wefeed-h5api-bff/subject/trending", "/wefeed-h5api-bff/subject/trending"]
     with pytest.raises(ProviderError):
         service.search("Example", 2)
 
