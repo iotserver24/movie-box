@@ -80,11 +80,33 @@ def test_paginated_search_with_anonymous_session():
     assert service.search("Example", 2) is result
 
 
+def test_search_uses_suggestion_spelling_for_the_website_page():
+    seen = []
+
+    def handler(request):
+        if request.url.path.endswith("/subject/search-suggest"):
+            return httpx.Response(200, json={"code": 0, "data": {"items": [{"word": "Mr. Robot"}, {"word": "mr robot series"}]}})
+        if request.url.path == "/newWeb/searchResult":
+            seen.append(request.url.params["keyword"])
+            return httpx.Response(404)
+        if request.url.path.endswith("/subject/trending"):
+            return httpx.Response(200, headers={"x-user": json.dumps({"token": "guest-token"})}, json={"code": 0, "data": {}})
+        if request.url.path.endswith("/subject/search"):
+            return httpx.Response(200, json={"code": 0, "data": {"items": [SUBJECT], "pager": {"hasMore": False}}})
+        raise AssertionError(request.url)
+
+    service = MovieBoxProvider(httpx.Client(base_url="https://themoviebox.xyz", transport=httpx.MockTransport(handler)))
+    assert service.search("mr robot").items[0].title == "Example Movie"
+    assert seen == ["Mr. Robot"]
+
+
 def test_search_page_includes_series_missing_from_json_search():
     rendered = [None, {"pager": 2, "items": 3}, {"hasMore": 5, "nextPage": 6}, [4], {"subjectId": 7, "subjectType": 8, "title": 9, "detailPath": 10}, True, "2", "456", 2, "Mr. Robot S1-S4", "mr-robot-abc"]
     html = f'<script id="__NUXT_DATA__">{json.dumps(rendered)}</script>'
 
     def handler(request):
+        if request.url.path.endswith("/subject/search-suggest"):
+            return httpx.Response(200, json={"code": 0, "data": {"items": []}})
         if request.url.path == "/newWeb/searchResult":
             return httpx.Response(200, text=html)
         if request.url.path.endswith("/subject/trending"):
@@ -103,6 +125,8 @@ def test_detail_probes_seasons_when_provider_has_no_detail():
     series = {**SERIES, "detailPath": "mr-robot-abc"}
 
     def handler(request):
+        if request.url.path.endswith("/subject/search-suggest"):
+            return httpx.Response(200, json={"code": 0, "data": {"items": []}})
         if request.url.path == "/newWeb/searchResult":
             return httpx.Response(404)
         if request.url.path.endswith("/subject/trending"):
@@ -132,6 +156,8 @@ def test_search_fallback_when_anonymous_session_is_unavailable():
 
     def handler(request):
         calls.append(request.url.path)
+        if request.url.path.endswith("/subject/search-suggest"):
+            return httpx.Response(200, json={"code": 0, "data": {"items": []}})
         if request.url.path.endswith("/subject/trending"):
             return httpx.Response(200, json={"code": 0, "data": {}})
         if request.url.path == "/newWeb/searchResult":
@@ -141,7 +167,7 @@ def test_search_fallback_when_anonymous_session_is_unavailable():
     service = MovieBoxProvider(httpx.Client(base_url="https://themoviebox.xyz", transport=httpx.MockTransport(handler)))
     result = service.search("Example")
     assert result.items[0].id == "123" and not result.has_more
-    assert calls == ["/newWeb/searchResult", "/wefeed-h5api-bff/subject/trending", "/wefeed-h5api-bff/subject/trending"]
+    assert calls == ["/wefeed-h5api-bff/subject/search-suggest", "/newWeb/searchResult", "/wefeed-h5api-bff/subject/trending", "/wefeed-h5api-bff/subject/trending"]
     with pytest.raises(ProviderError):
         service.search("Example", 2)
 

@@ -18,6 +18,10 @@ class ProviderError(Exception):
         self.status = status
 
 
+def _search_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
 def _kind(value: int | None) -> str:
     return {1: "movie", 2: "series", 7: "short_series"}.get(value, "other")
 
@@ -256,12 +260,23 @@ class MovieBoxProvider:
         except ProviderError:
             return None
 
+    def _website_query(self, keyword: str) -> str:
+        # The site page for "mr robot" omits the series that "Mr. Robot" includes.
+        try:
+            wanted = _search_key(keyword)
+            for word in self.suggestions(keyword):
+                if word and _search_key(word) == wanted:
+                    return word
+        except ProviderError:
+            return keyword
+        return keyword
+
     def search(self, keyword: str, page: int = 1) -> Page:
         def load():
             # The website's first page is server-rendered and includes multi-season
             # series the JSON search omits (for example Mr. Robot). Later pages still
             # come from the JSON search, which is what the site uses to paginate.
-            rendered = self._rendered_search(keyword) if page == 1 else None
+            rendered = self._rendered_search(self._website_query(keyword)) if page == 1 else None
             try:
                 api_page = self._api_search(keyword, page)
             except ProviderError:
