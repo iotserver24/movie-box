@@ -39,10 +39,19 @@ class DownloadControls extends StatelessWidget {
         children: [
           Text(task.statusLabel),
           const SizedBox(height: 8),
-          if (task.active)
+          if (task.active &&
+              (task.downloading || task.paused) &&
+              progress != null)
             LinearProgressIndicator(
-              value: task.paused ? (progress ?? 0) : progress,
+              value: progress,
               semanticsLabel: '${task.title.title} download progress',
+            ),
+          if (task.active &&
+              !((task.downloading || task.paused) && progress != null))
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
           const SizedBox(height: 6),
           Text(

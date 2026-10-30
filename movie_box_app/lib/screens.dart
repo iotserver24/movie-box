@@ -62,7 +62,10 @@ List<WatchEntry> latestWatchEntries(Iterable<WatchEntry> history) {
 
 String artworkUrl(String source, int width) {
   final uri = Uri.tryParse(source);
-  if (uri == null || uri.host != 'pbcdnw.aoneroom.com') return source;
+  if (uri == null ||
+      (uri.host != 'aoneroom.com' && !uri.host.endsWith('.aoneroom.com'))) {
+    return source;
+  }
   return uri
       .replace(
         queryParameters: {
