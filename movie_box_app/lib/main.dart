@@ -9,9 +9,25 @@ import 'screens.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final library = MovieLibrary(await SharedPreferences.getInstance());
+  SharedPreferences prefs;
+  try {
+    prefs = await SharedPreferences.getInstance();
+  } catch (e) {
+    debugPrint('SharedPreferences init error: $e');
+    await Future.delayed(const Duration(milliseconds: 300));
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (e2) {
+      debugPrint('SharedPreferences retry error: $e2');
+      SharedPreferences.setMockInitialValues({});
+      prefs = await SharedPreferences.getInstance();
+    }
+  }
+  final library = MovieLibrary(prefs);
   runApp(MovieBoxApp(library: library));
-  unawaited(library.backfillThumbnails());
+  try {
+    unawaited(library.backfillThumbnails());
+  } catch (_) {}
 }
 
 class MovieBoxApp extends StatefulWidget {

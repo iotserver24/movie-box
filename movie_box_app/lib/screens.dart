@@ -82,26 +82,30 @@ class Artwork extends StatelessWidget {
   const Artwork({super.key, this.url, this.width = 420});
 
   @override
-  Widget build(BuildContext context) => url == null || url!.isEmpty
-      ? const ColoredBox(
-          color: Color(0xFF273238),
-          child: Icon(Icons.movie, size: 40),
-        )
-      : CachedNetworkImage(
-          imageUrl: artworkUrl(url!, width),
-          fit: BoxFit.cover,
-          memCacheWidth: width,
-          maxWidthDiskCache: width,
-          fadeInDuration: const Duration(milliseconds: 120),
-          placeholder: (_, _) => const ColoredBox(
-            color: Color(0xFF273238),
-            child: Center(child: Icon(Icons.movie_outlined, size: 32)),
-          ),
-          errorWidget: (_, _, _) => const ColoredBox(
-            color: Color(0xFF273238),
-            child: Icon(Icons.movie, size: 40),
-          ),
-        );
+  Widget build(BuildContext context) {
+    if (url == null || url!.isEmpty) {
+      return const ColoredBox(
+        color: Color(0xFF273238),
+        child: Icon(Icons.movie, size: 40),
+      );
+    }
+    final processedUrl = artworkUrl(url!, width);
+    return CachedNetworkImage(
+      imageUrl: processedUrl,
+      fit: BoxFit.cover,
+      memCacheWidth: width,
+      maxWidthDiskCache: width,
+      fadeInDuration: const Duration(milliseconds: 120),
+      placeholder: (_, _) => const ColoredBox(
+        color: Color(0xFF273238),
+        child: Center(child: Icon(Icons.movie_outlined, size: 32)),
+      ),
+      errorWidget: (_, _, _) => const ColoredBox(
+        color: Color(0xFF273238),
+        child: Icon(Icons.movie, size: 40),
+      ),
+    );
+  }
 }
 
 class DownloadArtwork extends StatelessWidget {
@@ -271,7 +275,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   child:
                       snapshot.connectionState == ConnectionState.done &&
                           snapshot.hasError
-                      ? ErrorPanel(error: snapshot.error!, retry: reload)
+                      ? ErrorPanel(
+                          error: snapshot.error!,
+                          retry: reload,
+                          api: widget.api,
+                          library: widget.library,
+                          onSettingsSaved: reload,
+                        )
                       : const MovieBoxLoader(label: 'Loading your home'),
                 ),
               ),
@@ -588,7 +598,19 @@ class MovieRow extends StatelessWidget {
 class ErrorPanel extends StatelessWidget {
   final Object error;
   final VoidCallback retry;
-  const ErrorPanel({super.key, required this.error, required this.retry});
+  final MovieApi? api;
+  final MovieLibrary? library;
+  final VoidCallback? onSettingsSaved;
+
+  const ErrorPanel({
+    super.key,
+    required this.error,
+    required this.retry,
+    this.api,
+    this.library,
+    this.onSettingsSaved,
+  });
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.all(24),
@@ -599,10 +621,26 @@ class ErrorPanel extends StatelessWidget {
         const SizedBox(height: 12),
         Text('$error', textAlign: TextAlign.center),
         TextButton(onPressed: retry, child: const Text('Try again')),
-        TextButton(
-          onPressed: () => Navigator.pushNamed(context, '/settings'),
-          child: const Text('Server settings'),
-        ),
+        if (api != null && library != null)
+          TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => Scaffold(
+                  appBar: AppBar(title: const Text('Settings')),
+                  body: SettingsScreen(
+                    api: api!,
+                    library: library!,
+                    onSaved: () {
+                      onSettingsSaved?.call();
+                      retry();
+                    },
+                  ),
+                ),
+              ),
+            ),
+            child: const Text('Server settings'),
+          ),
       ],
     ),
   );
@@ -1046,16 +1084,13 @@ class _DetailScreenState extends State<DetailScreen> {
     if (!showEpisodeSearch || query.isEmpty) {
       return all.where((item) => item.$1 == selectedSeason).toList();
     }
-    final explicit = RegExp(
-      r's(?:eason)?\s*(\d+)\s*e(?:p(?:isode)?)?\s*(\d+)',
-    ).firstMatch(query);
+    final explicit = RegExp(r's(?:eason)?\s*(\d+)\s*e(?:p(?:isode)?)?\s*(\d+)')
+        .firstMatch(query);
     if (explicit != null) {
       final wantedSeason = int.parse(explicit.group(1)!);
       final wantedEpisode = int.parse(explicit.group(2)!);
       return all
-          .where(
-            (item) => item.$1 == wantedSeason && item.$2 == wantedEpisode,
-          )
+          .where((item) => item.$1 == wantedSeason && item.$2 == wantedEpisode)
           .toList();
     }
     final number = int.tryParse(query);
@@ -1385,8 +1420,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                         : '${item.$2}',
                                   ),
                                   selected:
-                                      episode == item.$2 &&
-                                      season == item.$1,
+                                      episode == item.$2 && season == item.$1,
                                   onSelected: (_) => setState(() {
                                     season = item.$1;
                                     episode = item.$2;

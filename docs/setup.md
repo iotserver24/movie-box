@@ -23,8 +23,11 @@ Copy `.env.example` only on first setup so you do not overwrite existing configu
 | --- | --- | --- |
 | `SCRAPER_BIND` | `127.0.0.1` | Host interface on which Compose publishes port 8000 |
 | `SCRAPER_API_TOKEN` | Empty | When set, `/v1/` requests require `Authorization: Bearer <token>` |
+| `SCRAPER_UPSTREAM_PROXY` | Empty | Optional HTTP(S) proxy used for upstream MovieBox requests; use a trusted US egress proxy for US-region home cards |
 
 Generate a token locally, for example with `openssl rand -hex 32`, and store it only in your local `.env` and the client settings. Do not post its output or commit the file. Set the token before exposing the port beyond localhost.
+
+The upstream MovieBox service selects its home-card region using the scraper's public egress IP. The app cannot change this with a country setting or request header. To use US-region home cards, configure `SCRAPER_UPSTREAM_PROXY` with a trusted proxy endpoint whose exit is in the United States, or run the scraper on a US-hosted server. Keep proxy credentials in the untracked `.env` file and use a provider you trust; do not commit or share the endpoint if it contains credentials.
 
 `/health` is deliberately unauthenticated; it does not prove the upstream provider is reachable. FastAPI's schema and documentation at `/openapi.json`, `/docs`, and `/redoc` are also not covered by the `/v1/` token dependency. The container health check only checks `/health`.
 

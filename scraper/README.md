@@ -14,6 +14,8 @@ curl http://127.0.0.1:8000/health
 
 By default the port is bound to localhost only. For an Android device on the same trusted network, set `SCRAPER_BIND` to the host's private network address and `SCRAPER_API_TOKEN` to a strong random value in `.env`, then restart Compose. Send `Authorization: Bearer <token>` with API requests. Use a private VPN rather than exposing this service on the public internet. Interactive OpenAPI documentation is at `/docs`.
 
+The upstream home-card region is selected from the scraper's public egress IP. To request a particular region, run the scraper in that region or set `SCRAPER_UPSTREAM_PROXY` to a trusted HTTP(S) proxy with the desired egress location. Country/region request headers do not override the upstream's IP-based region detection. Store proxy credentials only in `.env`; do not commit them.
+
 ## API
 
 - `GET /v1/home`: banner titles and editorial sections (including animation and other public sections when present).

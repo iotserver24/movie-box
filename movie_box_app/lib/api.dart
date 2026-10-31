@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'model.dart';
@@ -30,10 +31,11 @@ class MovieApi {
             url(path, params),
             headers: {if (token.isNotEmpty) 'Authorization': 'Bearer $token'},
           )
-          .timeout(const Duration(seconds: 35));
-    } catch (_) {
+          .timeout(const Duration(seconds: 15));
+    } catch (e, st) {
+      debugPrint('MovieApi GET $path failed: $e\n$st');
       throw ApiException(
-        'Cannot connect to the scraper. Check its address in Settings.',
+        'Cannot connect to the scraper ($e). Check its address in Settings.',
       );
     }
     if (response.statusCode != 200) {
