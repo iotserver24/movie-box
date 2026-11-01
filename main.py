@@ -25,6 +25,12 @@ def verify_token(authorization: str = Header(default="")):
 UPSTREAM_BASE = "https://themoviebox.xyz"
 H5_API_BASE = "https://themoviebox.xyz/wefeed-h5api-bff"
 
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": f"{UPSTREAM_BASE}/",
+    "X-Request-Lang": "en",
+}
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -32,7 +38,7 @@ def health():
 @app.get("/v1/home")
 def get_home(_ = Depends(verify_token)):
     try:
-        res = requests.get(f"{H5_API_BASE}/home", headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        res = requests.get(f"{H5_API_BASE}/home", params={"host": "themoviebox.xyz"}, headers=DEFAULT_HEADERS, timeout=15)
         if res.status_code == 200:
             return res.json().get("data", {"banners": [], "sections": []})
     except Exception:
@@ -44,8 +50,8 @@ def get_catalog(name: str, page: int = 1, _ = Depends(verify_token)):
     try:
         res = requests.get(
             f"{H5_API_BASE}/catalog/{name}",
-            params={"page": page},
-            headers={"User-Agent": "Mozilla/5.0"},
+            params={"page": page, "host": "themoviebox.xyz"},
+            headers=DEFAULT_HEADERS,
             timeout=15,
         )
         if res.status_code == 200:
@@ -60,7 +66,7 @@ def get_search(q: str = Query(...), page: int = 1, _ = Depends(verify_token)):
         res = requests.post(
             f"{H5_API_BASE}/subject/search",
             json={"keyword": q, "page": page, "perPage": 28, "subjectType": 0},
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/"},
+            headers=DEFAULT_HEADERS,
             timeout=15,
         )
         if res.status_code == 200:
@@ -75,7 +81,7 @@ def get_suggestions(q: str = Query(...), _ = Depends(verify_token)):
         res = requests.post(
             f"{H5_API_BASE}/subject/search-suggest",
             json={"keyword": q, "perPage": 10},
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/"},
+            headers=DEFAULT_HEADERS,
             timeout=15,
         )
         if res.status_code == 200:
@@ -90,7 +96,8 @@ def get_popular(_ = Depends(verify_token)):
     try:
         res = requests.get(
             f"{H5_API_BASE}/subject/everyone-search",
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/"},
+            params={"host": "themoviebox.xyz"},
+            headers=DEFAULT_HEADERS,
             timeout=15,
         )
         if res.status_code == 200:
@@ -103,10 +110,11 @@ def get_popular(_ = Depends(verify_token)):
 @app.get("/v1/titles/{path:path}/recommendations")
 def get_recommendations(path: str, page: int = 1, _ = Depends(verify_token)):
     try:
+        headers = {**DEFAULT_HEADERS, "Referer": f"{UPSTREAM_BASE}/movies/{path}"}
         detail_res = requests.get(
             f"{H5_API_BASE}/detail",
-            params={"detailPath": path},
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+            params={"detailPath": path, "host": "themoviebox.xyz"},
+            headers=headers,
             timeout=15,
         )
         if detail_res.status_code == 200:
@@ -114,8 +122,8 @@ def get_recommendations(path: str, page: int = 1, _ = Depends(verify_token)):
             if subject_id:
                 rec_res = requests.get(
                     f"{H5_API_BASE}/subject/detail-rec",
-                    params={"subjectId": subject_id, "page": page, "perPage": 12},
-                    headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+                    params={"subjectId": subject_id, "page": page, "perPage": 12, "host": "themoviebox.xyz"},
+                    headers=headers,
                     timeout=15,
                 )
                 if rec_res.status_code == 200:
@@ -128,10 +136,11 @@ def get_recommendations(path: str, page: int = 1, _ = Depends(verify_token)):
 @app.get("/v1/titles/{path:path}/playback")
 def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verify_token)):
     try:
+        headers = {**DEFAULT_HEADERS, "Referer": f"{UPSTREAM_BASE}/movies/{path}"}
         detail_res = requests.get(
             f"{H5_API_BASE}/detail",
-            params={"detailPath": path},
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+            params={"detailPath": path, "host": "themoviebox.xyz"},
+            headers=headers,
             timeout=15,
         )
         if detail_res.status_code != 200 or detail_res.json().get("code") != 0:
@@ -150,7 +159,7 @@ def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verif
                 "streamSignType": 1,
                 "supportCodecs[h264]": 1,
             },
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+            headers=headers,
             timeout=15,
         )
         play_res.raise_for_status()
@@ -163,10 +172,11 @@ def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verif
 @app.get("/v1/titles/{path:path}/captions")
 def get_captions(path: str, stream_id: str = "", season: int = 0, episode: int = 0, _ = Depends(verify_token)):
     try:
+        headers = {**DEFAULT_HEADERS, "Referer": f"{UPSTREAM_BASE}/movies/{path}"}
         detail_res = requests.get(
             f"{H5_API_BASE}/detail",
-            params={"detailPath": path},
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+            params={"detailPath": path, "host": "themoviebox.xyz"},
+            headers=headers,
             timeout=15,
         )
         subject_id = ""
@@ -181,7 +191,7 @@ def get_captions(path: str, stream_id: str = "", season: int = 0, episode: int =
                 "subjectId": subject_id,
                 "detailPath": path,
             },
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+            headers=headers,
             timeout=15,
         )
         cap_res.raise_for_status()
@@ -193,7 +203,7 @@ def get_captions(path: str, stream_id: str = "", season: int = 0, episode: int =
                 "label": c.get("lanName", lang),
                 "language": lang,
                 "url": c.get("url"),
-                "request_headers": {"Referer": UPSTREAM_BASE, "User-Agent": "Mozilla/5.0"}
+                "request_headers": {"Referer": UPSTREAM_BASE, "User-Agent": DEFAULT_HEADERS["User-Agent"]}
             })
         return formatted
     except Exception:
@@ -202,10 +212,11 @@ def get_captions(path: str, stream_id: str = "", season: int = 0, episode: int =
 @app.get("/v1/titles/{path:path}")
 def get_title_detail(path: str, _ = Depends(verify_token)):
     try:
+        headers = {**DEFAULT_HEADERS, "Referer": f"{UPSTREAM_BASE}/movies/{path}"}
         res = requests.get(
             f"{H5_API_BASE}/detail",
-            params={"detailPath": path},
-            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+            params={"detailPath": path, "host": "themoviebox.xyz"},
+            headers=headers,
             timeout=15,
         )
         if res.status_code == 200 and res.json().get("code") == 0:
