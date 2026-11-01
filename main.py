@@ -57,10 +57,10 @@ def get_catalog(name: str, page: int = 1, _ = Depends(verify_token)):
 @app.get("/v1/search")
 def get_search(q: str = Query(...), page: int = 1, _ = Depends(verify_token)):
     try:
-        res = requests.get(
-            f"{H5_API_BASE}/search",
-            params={"q": q, "page": page},
-            headers={"User-Agent": "Mozilla/5.0"},
+        res = requests.post(
+            f"{H5_API_BASE}/subject/search",
+            json={"keyword": q, "page": page, "perPage": 28, "subjectType": 0},
+            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/"},
             timeout=15,
         )
         if res.status_code == 200:
@@ -72,14 +72,15 @@ def get_search(q: str = Query(...), page: int = 1, _ = Depends(verify_token)):
 @app.get("/v1/search/suggestions")
 def get_suggestions(q: str = Query(...), _ = Depends(verify_token)):
     try:
-        res = requests.get(
-            f"{H5_API_BASE}/search/suggestions",
-            params={"q": q},
-            headers={"User-Agent": "Mozilla/5.0"},
+        res = requests.post(
+            f"{H5_API_BASE}/subject/search-suggest",
+            json={"keyword": q, "perPage": 10},
+            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/"},
             timeout=15,
         )
         if res.status_code == 200:
-            return res.json().get("data", [])
+            items = res.json().get("data", {}).get("items", [])
+            return [x["word"] for x in items if x.get("word")]
     except Exception:
         pass
     return []
@@ -88,12 +89,13 @@ def get_suggestions(q: str = Query(...), _ = Depends(verify_token)):
 def get_popular(_ = Depends(verify_token)):
     try:
         res = requests.get(
-            f"{H5_API_BASE}/search/popular",
-            headers={"User-Agent": "Mozilla/5.0"},
+            f"{H5_API_BASE}/subject/everyone-search",
+            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/"},
             timeout=15,
         )
         if res.status_code == 200:
-            return res.json().get("data", [])
+            items = res.json().get("data", {}).get("everyoneSearch", [])
+            return [x["title"] for x in items if x.get("title")]
     except Exception:
         pass
     return []
@@ -102,35 +104,56 @@ def get_popular(_ = Depends(verify_token)):
 def get_title_detail(path: str, _ = Depends(verify_token)):
     try:
         res = requests.get(
-            f"{H5_API_BASE}/subject/detail",
+            f"{H5_API_BASE}/detail",
             params={"detailPath": path},
             headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
             timeout=15,
         )
-        if res.status_code == 200:
+        if res.status_code == 200 and res.json().get("code") == 0:
             return res.json().get("data", {})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     raise HTTPException(status_code=404, detail="Title not found")
 
 @app.get("/v1/titles/{path:path}/recommendations")
-def get_recommendations(path: str, _ = Depends(verify_token)):
+def get_recommendations(path: str, page: int = 1, _ = Depends(verify_token)):
+    try:
+        detail_res = requests.get(
+            f"{H5_API_BASE}/detail",
+            params={"detailPath": path},
+            headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+            timeout=15,
+        )
+        if detail_res.status_code == 200:
+            subject_id = detail_res.json().get("data", {}).get("subject", {}).get("subjectId")
+            if subject_id:
+                rec_res = requests.get(
+                    f"{H5_API_BASE}/subject/detail-rec",
+                    params={"subjectId": subject_id, "page": page, "perPage": 12},
+                    headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
+                    timeout=15,
+                )
+                if rec_res.status_code == 200:
+                    items = rec_res.json().get("data", {}).get("items", [])
+                    return {"items": items, "next_page": page + 1 if len(items) == 12 else None}
+    except Exception:
+        pass
     return {"items": [], "next_page": None}
 
 @app.get("/v1/titles/{path:path}/playback")
 def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verify_token)):
     try:
         detail_res = requests.get(
-            f"{H5_API_BASE}/subject/detail",
+            f"{H5_API_BASE}/detail",
             params={"detailPath": path},
             headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
             timeout=15,
         )
-        if detail_res.status_code != 200:
+        if detail_res.status_code != 200 or detail_res.json().get("code") != 0:
             raise HTTPException(status_code=404, detail="Title not found")
 
         subject_data = detail_res.json().get("data", {})
-        subject_id = subject_data.get("title", {}).get("id")
+        subject_id = subject_data.get("subject", {}).get("subjectId")
 
         play_res = requests.get(
             f"{H5_API_BASE}/subject/play",
@@ -147,6 +170,8 @@ def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verif
         )
         play_res.raise_for_status()
         return play_res.json().get("data", {"streams": [], "vip_locked": False, "limited": False})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -154,17 +179,17 @@ def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verif
 def get_captions(path: str, stream_id: str = "", season: int = 0, episode: int = 0, _ = Depends(verify_token)):
     try:
         detail_res = requests.get(
-            f"{H5_API_BASE}/subject/detail",
+            f"{H5_API_BASE}/detail",
             params={"detailPath": path},
             headers={"User-Agent": "Mozilla/5.0", "Referer": f"{UPSTREAM_BASE}/movies/{path}"},
             timeout=15,
         )
         subject_id = ""
         if detail_res.status_code == 200:
-            subject_id = detail_res.json().get("data", {}).get("title", {}).get("id", "")
+            subject_id = detail_res.json().get("data", {}).get("subject", {}).get("subjectId", "")
 
         cap_res = requests.get(
-            "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/caption",
+            f"{H5_API_BASE}/subject/caption",
             params={
                 "format": "MP4",
                 "id": stream_id,
@@ -186,5 +211,5 @@ def get_captions(path: str, stream_id: str = "", season: int = 0, episode: int =
                 "request_headers": {"Referer": UPSTREAM_BASE, "User-Agent": "Mozilla/5.0"}
             })
         return formatted
-    except Exception as e:
+    except Exception:
         return []
