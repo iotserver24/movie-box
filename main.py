@@ -143,16 +143,15 @@ def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verif
             headers=headers,
             timeout=15,
         )
-        if detail_res.status_code != 200 or detail_res.json().get("code") != 0:
-            raise HTTPException(status_code=404, detail="Title not found")
-
-        subject_data = detail_res.json().get("data", {})
-        subject_id = subject_data.get("subject", {}).get("subjectId")
+        subject_id = None
+        if detail_res.status_code == 200:
+            subject_data = detail_res.json().get("data", {})
+            subject_id = subject_data.get("subject", {}).get("subjectId")
 
         play_res = requests.get(
             f"{H5_API_BASE}/subject/play",
             params={
-                "subjectId": subject_id,
+                "subjectId": subject_id or "",
                 "se": season,
                 "ep": episode,
                 "detailPath": path,
@@ -162,8 +161,9 @@ def get_playback(path: str, season: int = 0, episode: int = 0, _ = Depends(verif
             headers=headers,
             timeout=15,
         )
-        play_res.raise_for_status()
-        return play_res.json().get("data", {"streams": [], "vip_locked": False, "limited": False})
+        if play_res.status_code == 200:
+            return play_res.json().get("data", {"streams": [], "vip_locked": False, "limited": False})
+        raise HTTPException(status_code=play_res.status_code, detail="Playback unavailable")
     except HTTPException:
         raise
     except Exception as e:
@@ -194,20 +194,21 @@ def get_captions(path: str, stream_id: str = "", season: int = 0, episode: int =
             headers=headers,
             timeout=15,
         )
-        cap_res.raise_for_status()
-        captions_raw = cap_res.json().get("data", {}).get("captions", [])
-        formatted = []
-        for c in captions_raw:
-            lang = c.get("lan", "en").replace("in_id", "id")
-            formatted.append({
-                "label": c.get("lanName", lang),
-                "language": lang,
-                "url": c.get("url"),
-                "request_headers": {"Referer": UPSTREAM_BASE, "User-Agent": DEFAULT_HEADERS["User-Agent"]}
-            })
-        return formatted
+        if cap_res.status_code == 200:
+            captions_raw = cap_res.json().get("data", {}).get("captions", [])
+            formatted = []
+            for c in captions_raw:
+                lang = c.get("lan", "en").replace("in_id", "id")
+                formatted.append({
+                    "label": c.get("lanName", lang),
+                    "language": lang,
+                    "url": c.get("url"),
+                    "request_headers": {"Referer": UPSTREAM_BASE, "User-Agent": DEFAULT_HEADERS["User-Agent"]}
+                })
+            return formatted
     except Exception:
-        return []
+        pass
+    return []
 
 @app.get("/v1/titles/{path:path}")
 def get_title_detail(path: str, _ = Depends(verify_token)):
@@ -219,8 +220,16 @@ def get_title_detail(path: str, _ = Depends(verify_token)):
             headers=headers,
             timeout=15,
         )
-        if res.status_code == 200 and res.json().get("code") == 0:
-            return res.json().get("data", {})
+        if res.status_code == 200:
+            payload = res.json()
+            data = payload.get("data")
+            if data and ("subject" in data or "title" in data):
+                return data
+            if payload.get("code") == 0:
+                return data or {}
+            raise HTTPException(status_code=404, detail=f"Upstream returned code {payload.get('code')}: {payload.get('msg')}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     raise HTTPException(status_code=404, detail="Title not found")
