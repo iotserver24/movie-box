@@ -1,4 +1,6 @@
 import os
+import time
+import json
 import requests
 from fastapi import FastAPI, HTTPException, Query, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +33,30 @@ DEFAULT_HEADERS = {
     "X-Request-Lang": "en",
 }
 
+_guest_token_cache = {"token": None, "expires": 0}
+
+def get_guest_token() -> str:
+    now = time.time()
+    if _guest_token_cache["token"] and _guest_token_cache["expires"] > now:
+        return _guest_token_cache["token"]
+    try:
+        resp = requests.get(
+            f"{H5_API_BASE}/subject/trending",
+            params={"page": 1, "perPage": 1, "host": "themoviebox.xyz"},
+            headers=DEFAULT_HEADERS,
+            timeout=10,
+        )
+        x_user = resp.headers.get("x-user")
+        if x_user:
+            token = json.loads(x_user).get("token")
+            if token:
+                _guest_token_cache["token"] = token
+                _guest_token_cache["expires"] = now + 300
+                return token
+    except Exception:
+        pass
+    return ""
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -48,9 +74,11 @@ def get_home(_ = Depends(verify_token)):
 @app.get("/v1/catalog/{name}")
 def get_catalog(name: str, page: int = 1, _ = Depends(verify_token)):
     try:
-        res = requests.get(
-            f"{H5_API_BASE}/catalog/{name}",
-            params={"page": page, "host": "themoviebox.xyz"},
+        channels = {"movies": 1, "series": 2, "animation": 1006}
+        channel_id = channels.get(name, 1)
+        res = requests.post(
+            f"{H5_API_BASE}/subject/filter",
+            json={"channelId": channel_id, "page": page, "perPage": 28, "sort": "ForYou"},
             headers=DEFAULT_HEADERS,
             timeout=15,
         )
@@ -63,10 +91,14 @@ def get_catalog(name: str, page: int = 1, _ = Depends(verify_token)):
 @app.get("/v1/search")
 def get_search(q: str = Query(...), page: int = 1, _ = Depends(verify_token)):
     try:
+        token = get_guest_token()
+        headers = {**DEFAULT_HEADERS}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         res = requests.post(
             f"{H5_API_BASE}/subject/search",
             json={"keyword": q, "page": page, "perPage": 28, "subjectType": 0},
-            headers=DEFAULT_HEADERS,
+            headers=headers,
             timeout=15,
         )
         if res.status_code == 200:
@@ -78,10 +110,14 @@ def get_search(q: str = Query(...), page: int = 1, _ = Depends(verify_token)):
 @app.get("/v1/search/suggestions")
 def get_suggestions(q: str = Query(...), _ = Depends(verify_token)):
     try:
+        token = get_guest_token()
+        headers = {**DEFAULT_HEADERS}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         res = requests.post(
             f"{H5_API_BASE}/subject/search-suggest",
             json={"keyword": q, "perPage": 10},
-            headers=DEFAULT_HEADERS,
+            headers=headers,
             timeout=15,
         )
         if res.status_code == 200:
