@@ -15,13 +15,24 @@ class ApiException implements Exception {
 class MovieApi {
   String baseUrl;
   String token;
+  String region;
   final http.Client client;
-  MovieApi({required this.baseUrl, this.token = '', http.Client? client})
-    : client = client ?? http.Client();
+  MovieApi({
+    required this.baseUrl,
+    this.token = '',
+    this.region = 'US',
+    http.Client? client,
+  }) : client = client ?? http.Client();
 
-  Uri url(String path, [Map<String, String>? params]) =>
-      Uri.parse('${baseUrl.replaceAll(RegExp(r'/$'), '')}$path')
-          .replace(queryParameters: params);
+  Uri url(String path, [Map<String, String>? params]) {
+    final query = <String, String>{
+      if (region.isNotEmpty) 'region': region,
+      if (region.isNotEmpty) 'lang': 'en',
+      ...?params,
+    };
+    return Uri.parse('${baseUrl.replaceAll(RegExp(r'/$'), '')}$path')
+        .replace(queryParameters: query.isEmpty ? null : query);
+  }
 
   Future<dynamic> get(String path, [Map<String, String>? params]) async {
     http.Response response;
@@ -29,7 +40,11 @@ class MovieApi {
       response = await client
           .get(
             url(path, params),
-            headers: {if (token.isNotEmpty) 'Authorization': 'Bearer $token'},
+            headers: {
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+              'Accept-Language': 'en-US,en;q=0.9',
+              if (region.isNotEmpty) 'X-Region': region,
+            },
           )
           .timeout(const Duration(seconds: 15));
     } catch (e, st) {
@@ -56,8 +71,20 @@ class MovieApi {
   Future<MovieHome> home() async => MovieHome.fromJson(await get('/v1/home'));
   Future<MovieHome> collection(String name) async =>
       MovieHome.fromJson(await get('/v1/collections/$name'));
-  Future<MoviePage> catalog(String name, int page) async =>
-      MoviePage.fromJson(await get('/v1/catalog/$name', {'page': '$page'}));
+  Future<MoviePage> catalog(String name, int page) async {
+    final canonical = name.toLowerCase().trim();
+    if (canonical == 'movies' || canonical == 'series' || canonical == 'animation' || canonical == 'anime' || canonical == 'kids') {
+      try {
+        return MoviePage.fromJson(
+          await get('/v1/catalog/$canonical', {'page': '$page'}),
+        );
+      } catch (e, st) {
+        debugPrint('Catalog $canonical request failed: $e\n$st');
+        rethrow;
+      }
+    }
+    return search(name, page);
+  }
   Future<MoviePage> search(String query, int page) async => MoviePage.fromJson(
     await get('/v1/search', {'q': query, 'page': '$page'}),
   );
