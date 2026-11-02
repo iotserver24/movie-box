@@ -80,25 +80,6 @@ def is_family_friendly(item: dict) -> bool:
         return False
     return True
 
-def is_strict_kids(item: dict) -> bool:
-    if not is_family_friendly(item):
-        return False
-    genre_str = (item.get("genre") or "").casefold()
-    title_str = (item.get("title") or "").casefold()
-    if "anime" in genre_str or "animation" in genre_str and ("the animation" in title_str or any(w in title_str for w in ["melty", "yamitsuki", "shiranai", "nagachichi", "kaede", "suzu", "shoku"])):
-        return False
-    allowed_genres = ["family", "adventure", "cartoon", "comedy"]
-    return any(g in genre_str for g in allowed_genres)
-
-def is_clean_anime(item: dict) -> bool:
-    if not is_family_friendly(item):
-        return False
-    genre_str = (item.get("genre") or "").casefold()
-    title_str = (item.get("title") or "").casefold()
-    if "edition" in title_str or any(w in title_str for w in ["inyouchuu", "melty", "yamitsuki", "shiranai", "nagachichi", "kaede", "suzu", "shoku"]):
-        return False
-    return "anime" in genre_str or "anime" in title_str
-
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -122,66 +103,91 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
+        sections = []
+        all_items = []
+        seen_ids = set()
+
         if canonical == "kids":
-            all_items = []
-            seen_ids = set()
-            for kw in ["disney", "cartoon", "family", "pixar", "barbie"]:
+            row_queries = [
+                ("Cartoon Movies", "cartoon movie"),
+                ("Cartoon Series", "cartoon series"),
+                ("Pixar Studio", "pixar"),
+                ("DreamWorks Studio", "dreamworks"),
+                ("Illumination Studio", "illumination"),
+                ("Kung Fu Panda", "kung fu panda"),
+                ("Cars", "cars"),
+                ("Frozen", "frozen"),
+                ("Minions", "minions"),
+            ]
+            for title, query in row_queries:
                 res = session.post(
                     f"{H5_API_BASE}/subject/search",
-                    json={"keyword": kw, "page": page, "perPage": 28, "subjectType": 0},
+                    json={"keyword": query, "page": page, "perPage": 12, "subjectType": 0},
                     headers=headers,
                     timeout=15,
                 )
+                sec_items = []
                 if res.status_code == 200:
                     data = res.json().get("data", {})
                     for x in data.get("items", []):
-                        sid = x.get("subjectId")
-                        if sid not in seen_ids and is_strict_kids(x):
-                            seen_ids.add(sid)
-                            all_items.append(x)
-            return {"items": all_items, "next_page": page + 1 if len(all_items) >= 10 else None}
+                        if is_family_friendly(x):
+                            sec_items.append(x)
+                            sid = x.get("subjectId")
+                            if sid not in seen_ids:
+                                seen_ids.add(sid)
+                                all_items.append(x)
+                if sec_items:
+                    sections.append({"title": title, "items": sec_items})
 
-        if canonical == "anime":
-            all_anime = []
-            seen_ids = set()
-            for kw in ["naruto", "demon slayer", "jujutsu kaisen", "spy x family", "my hero academia", "one piece", "dragon ball", "attack on titan"]:
+        elif canonical == "anime":
+            row_queries = [
+                ("Anime Movies", "anime movie"),
+                ("Japanese Anime", "japanese anime"),
+                ("Western Anime", "western animation"),
+                ("Dragon Ball", "dragon ball"),
+                ("Naruto", "naruto"),
+                ("One Piece", "one piece"),
+            ]
+            for title, query in row_queries:
                 res = session.post(
                     f"{H5_API_BASE}/subject/search",
-                    json={"keyword": kw, "page": page, "perPage": 28, "subjectType": 0},
+                    json={"keyword": query, "page": page, "perPage": 12, "subjectType": 0},
                     headers=headers,
                     timeout=15,
                 )
+                sec_items = []
                 if res.status_code == 200:
                     data = res.json().get("data", {})
                     for x in data.get("items", []):
-                        sid = x.get("subjectId")
-                        if sid not in seen_ids and is_clean_anime(x):
-                            seen_ids.add(sid)
-                            all_anime.append(x)
-            return {"items": all_anime, "next_page": page + 1 if len(all_anime) >= 10 else None}
-
-        if canonical == "animation":
-            keyword = "animation"
-        elif canonical == "movies":
-            keyword = "movie"
-        elif canonical == "series":
-            keyword = "series"
+                        if is_family_friendly(x) and "anime" in (x.get("genre") or "").casefold():
+                            sec_items.append(x)
+                            sid = x.get("subjectId")
+                            if sid not in seen_ids:
+                                seen_ids.add(sid)
+                                all_items.append(x)
+                if sec_items:
+                    sections.append({"title": title, "items": sec_items})
         else:
-            keyword = canonical
+            keyword = canonical if canonical != "animation" else "animation"
+            res = session.post(
+                f"{H5_API_BASE}/subject/search",
+                json={"keyword": keyword, "page": page, "perPage": 28, "subjectType": 0},
+                headers=headers,
+                timeout=15,
+            )
+            if res.status_code == 200:
+                data = res.json().get("data", {})
+                all_items = [x for x in data.get("items", []) if is_family_friendly(x)]
+                sections = [{"title": name.capitalize(), "items": all_items}]
 
-        res = session.post(
-            f"{H5_API_BASE}/subject/search",
-            json={"keyword": keyword, "page": page, "perPage": 28, "subjectType": 0},
-            headers=headers,
-            timeout=15,
-        )
-        if res.status_code == 200:
-            data = res.json().get("data", {})
-            items = [x for x in data.get("items", []) if is_family_friendly(x)]
-            return {"items": items, "next_page": data.get("next_page") or (page + 1 if len(items) >= 10 else None)}
+        return {
+            "items": all_items,
+            "sections": sections,
+            "next_page": page + 1 if len(all_items) >= 10 else None
+        }
     except Exception:
         pass
-    return {"items": [], "next_page": None}
+    return {"items": [], "sections": [], "next_page": None}
 
 @app.get("/v1/search")
 def get_search(q: str = Query(...), page: int = 1, _ = Depends(verify_token)):
