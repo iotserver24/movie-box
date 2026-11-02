@@ -64,6 +64,16 @@ def get_guest_token() -> str:
         pass
     return ""
 
+def is_family_friendly(item: dict) -> bool:
+    genre_str = (item.get("genre") or "").casefold()
+    title_str = (item.get("title") or "").casefold()
+    bad_keywords = ["adult", "erotica", "savita", "porn", "sex", "orgasm", "hentai", "uncensored"]
+    if any(b in title_str or b in genre_str for b in bad_keywords):
+        return False
+    if item.get("isPornographic") or item.get("webHighRisk"):
+        return False
+    return True
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -85,7 +95,7 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
         if canonical == "anime":
             keyword = "anime"
         elif canonical == "kids":
-            keyword = "cartoon"
+            keyword = "kids cartoon family animation"
         elif canonical == "animation":
             keyword = "animation"
         elif canonical == "movies":
@@ -106,7 +116,17 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
             timeout=15,
         )
         if res.status_code == 200:
-            return res.json().get("data", {"items": [], "next_page": None})
+            data = res.json().get("data", {})
+            items = data.get("items", [])
+
+            if canonical == "anime":
+                items = [x for x in items if is_family_friendly(x) and "anime" in (x.get("genre") or "").casefold()]
+            elif canonical == "kids":
+                items = [x for x in items if is_family_friendly(x) and not any(k in (x.get("genre") or "").casefold() for k in ["adult", "erotica", "horror"])]
+            else:
+                items = [x for x in items if is_family_friendly(x)]
+
+            return {"items": items, "next_page": data.get("next_page") or (page + 1 if len(items) >= 10 else None)}
     except Exception:
         pass
     return {"items": [], "next_page": None}
@@ -125,7 +145,9 @@ def get_search(q: str = Query(...), page: int = 1, _ = Depends(verify_token)):
             timeout=15,
         )
         if res.status_code == 200:
-            return res.json().get("data", {"items": [], "next_page": None})
+            data = res.json().get("data", {})
+            items = [x for x in data.get("items", []) if is_family_friendly(x)]
+            return {"items": items, "next_page": data.get("next_page")}
     except Exception:
         pass
     return {"items": [], "next_page": None}
@@ -185,7 +207,7 @@ def get_recommendations(path: str, page: int = 1, _ = Depends(verify_token)):
                     timeout=15,
                 )
                 if rec_res.status_code == 200:
-                    items = rec_res.json().get("data", {}).get("items", [])
+                    items = [x for x in rec_res.json().get("data", {}).get("items", []) if is_family_friendly(x)]
                     return {"items": items, "next_page": page + 1 if len(items) == 12 else None}
     except Exception:
         pass
