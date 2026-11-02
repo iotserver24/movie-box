@@ -67,7 +67,12 @@ def get_guest_token() -> str:
 def is_family_friendly(item: dict) -> bool:
     genre_str = (item.get("genre") or "").casefold()
     title_str = (item.get("title") or "").casefold()
-    bad_keywords = ["adult", "erotica", "savita", "porn", "sex", "orgasm", "hentai", "uncensored"]
+    bad_keywords = [
+        "adult", "erotica", "savita", "porn", "sex", "orgasm",
+        "hentai", "uncensored", "ecchi", "seinen", "mature",
+        "melty", "yamitsuki", "kowaremono", "mesudachi", "torokase",
+        "brickleberry", "kengan ashura"
+    ]
     if any(b in title_str or b in genre_str for b in bad_keywords):
         return False
     if item.get("isPornographic") or item.get("webHighRisk"):
@@ -92,10 +97,35 @@ def get_home(_ = Depends(verify_token)):
 def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = Depends(verify_token)):
     try:
         canonical = name.lower().strip()
+        token = get_guest_token()
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        if canonical == "kids":
+            all_items = []
+            seen_ids = set()
+            for kw in ["disney", "animation", "cartoon", "family"]:
+                res = session.post(
+                    f"{H5_API_BASE}/subject/search",
+                    json={"keyword": kw, "page": page, "perPage": 28, "subjectType": 0},
+                    headers=headers,
+                    timeout=15,
+                )
+                if res.status_code == 200:
+                    data = res.json().get("data", {})
+                    for x in data.get("items", []):
+                        sid = x.get("subjectId")
+                        if sid not in seen_ids and is_family_friendly(x):
+                            g_str = (x.get("genre") or "").casefold()
+                            t_str = (x.get("title") or "").casefold()
+                            if "anime" not in g_str and "the animation" not in t_str and any(g in g_str for g in ["animation", "family", "adventure", "cartoon"]):
+                                seen_ids.add(sid)
+                                all_items.append(x)
+            return {"items": all_items, "next_page": page + 1 if len(all_items) >= 10 else None}
+
         if canonical == "anime":
             keyword = "anime"
-        elif canonical == "kids":
-            keyword = "kids cartoon family animation"
         elif canonical == "animation":
             keyword = "animation"
         elif canonical == "movies":
@@ -105,10 +135,6 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
         else:
             keyword = canonical
 
-        token = get_guest_token()
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
         res = session.post(
             f"{H5_API_BASE}/subject/search",
             json={"keyword": keyword, "page": page, "perPage": 28, "subjectType": 0},
@@ -121,8 +147,6 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
 
             if canonical == "anime":
                 items = [x for x in items if is_family_friendly(x) and "anime" in (x.get("genre") or "").casefold()]
-            elif canonical == "kids":
-                items = [x for x in items if is_family_friendly(x) and not any(k in (x.get("genre") or "").casefold() for k in ["adult", "erotica", "horror"])]
             else:
                 items = [x for x in items if is_family_friendly(x)]
 
