@@ -82,17 +82,27 @@ def get_home(_ = Depends(verify_token)):
 def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = Depends(verify_token)):
     try:
         canonical = name.lower().strip()
-        channels = {"movies": 1, "series": 2, "animation": 1006, "anime": 1006, "kids": 5}
-        channel_id = channels.get(canonical, 1)
-        body = {"channelId": channel_id, "page": page, "perPage": 28, "sort": "ForYou"}
         if canonical == "anime":
-            body["genre"] = "Anime"
-        elif genre and genre != "All":
-            body["genre"] = genre
+            keyword = "anime"
+        elif canonical == "kids":
+            keyword = "cartoon"
+        elif canonical == "animation":
+            keyword = "animation"
+        elif canonical == "movies":
+            keyword = "movie"
+        elif canonical == "series":
+            keyword = "series"
+        else:
+            keyword = canonical
 
+        token = get_guest_token()
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         res = session.post(
-            f"{H5_API_BASE}/subject/filter",
-            json=body,
+            f"{H5_API_BASE}/subject/search",
+            json={"keyword": keyword, "page": page, "perPage": 28, "subjectType": 0},
+            headers=headers,
             timeout=15,
         )
         if res.status_code == 200:
