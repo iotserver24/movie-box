@@ -71,6 +71,7 @@ def is_family_friendly(item: dict) -> bool:
         "adult", "erotica", "savita", "porn", "sex", "orgasm",
         "hentai", "uncensored", "ecchi", "seinen", "mature",
         "melty", "yamitsuki", "kowaremono", "mesudachi", "torokase",
+        "inyouchuu", "shiranai", "nagachichi", "kaede", "suzu", "shoku",
         "brickleberry", "kengan ashura"
     ]
     if any(b in title_str or b in genre_str for b in bad_keywords):
@@ -78,6 +79,23 @@ def is_family_friendly(item: dict) -> bool:
     if item.get("isPornographic") or item.get("webHighRisk"):
         return False
     return True
+
+def is_strict_kids(item: dict) -> bool:
+    if not is_family_friendly(item):
+        return False
+    genre_str = (item.get("genre") or "").casefold()
+    title_str = (item.get("title") or "").casefold()
+    if "anime" in genre_str or "the animation" in title_str:
+        return False
+    allowed_genres = ["family", "adventure", "cartoon", "comedy", "animation"]
+    return any(g in genre_str for g in allowed_genres)
+
+def is_clean_anime(item: dict) -> bool:
+    if not is_family_friendly(item):
+        return False
+    genre_str = (item.get("genre") or "").casefold()
+    title_str = (item.get("title") or "").casefold()
+    return "anime" in genre_str or "anime" in title_str
 
 @app.get("/health")
 def health():
@@ -116,17 +134,31 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
                     data = res.json().get("data", {})
                     for x in data.get("items", []):
                         sid = x.get("subjectId")
-                        if sid not in seen_ids and is_family_friendly(x):
-                            g_str = (x.get("genre") or "").casefold()
-                            t_str = (x.get("title") or "").casefold()
-                            if "anime" not in g_str and "the animation" not in t_str and any(g in g_str for g in ["animation", "family", "adventure", "cartoon"]):
-                                seen_ids.add(sid)
-                                all_items.append(x)
+                        if sid not in seen_ids and is_strict_kids(x):
+                            seen_ids.add(sid)
+                            all_items.append(x)
             return {"items": all_items, "next_page": page + 1 if len(all_items) >= 10 else None}
 
         if canonical == "anime":
-            keyword = "anime"
-        elif canonical == "animation":
+            all_anime = []
+            seen_ids = set()
+            for kw in ["naruto", "demon slayer", "jujutsu kaisen", "spy x family", "my hero academia", "one piece", "dragon ball", "anime"]:
+                res = session.post(
+                    f"{H5_API_BASE}/subject/search",
+                    json={"keyword": kw, "page": page, "perPage": 28, "subjectType": 0},
+                    headers=headers,
+                    timeout=15,
+                )
+                if res.status_code == 200:
+                    data = res.json().get("data", {})
+                    for x in data.get("items", []):
+                        sid = x.get("subjectId")
+                        if sid not in seen_ids and is_clean_anime(x):
+                            seen_ids.add(sid)
+                            all_anime.append(x)
+            return {"items": all_anime, "next_page": page + 1 if len(all_anime) >= 10 else None}
+
+        if canonical == "animation":
             keyword = "animation"
         elif canonical == "movies":
             keyword = "movie"
@@ -143,13 +175,7 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
         )
         if res.status_code == 200:
             data = res.json().get("data", {})
-            items = data.get("items", [])
-
-            if canonical == "anime":
-                items = [x for x in items if is_family_friendly(x) and "anime" in (x.get("genre") or "").casefold()]
-            else:
-                items = [x for x in items if is_family_friendly(x)]
-
+            items = [x for x in data.get("items", []) if is_family_friendly(x)]
             return {"items": items, "next_page": data.get("next_page") or (page + 1 if len(items) >= 10 else None)}
     except Exception:
         pass
