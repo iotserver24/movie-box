@@ -72,7 +72,7 @@ def is_family_friendly(item: dict) -> bool:
         "hentai", "uncensored", "ecchi", "seinen", "mature",
         "melty", "yamitsuki", "kowaremono", "mesudachi", "torokase",
         "inyouchuu", "shiranai", "nagachichi", "kaede", "suzu", "shoku",
-        "brickleberry", "kengan ashura"
+        "brickleberry", "kengan ashura", "edition"
     ]
     if any(b in title_str or b in genre_str for b in bad_keywords):
         return False
@@ -85,9 +85,9 @@ def is_strict_kids(item: dict) -> bool:
         return False
     genre_str = (item.get("genre") or "").casefold()
     title_str = (item.get("title") or "").casefold()
-    if "anime" in genre_str or "the animation" in title_str:
+    if "anime" in genre_str or "animation" in genre_str and ("the animation" in title_str or any(w in title_str for w in ["melty", "yamitsuki", "shiranai", "nagachichi", "kaede", "suzu", "shoku"])):
         return False
-    allowed_genres = ["family", "adventure", "cartoon", "comedy", "animation"]
+    allowed_genres = ["family", "adventure", "cartoon", "comedy"]
     return any(g in genre_str for g in allowed_genres)
 
 def is_clean_anime(item: dict) -> bool:
@@ -95,6 +95,8 @@ def is_clean_anime(item: dict) -> bool:
         return False
     genre_str = (item.get("genre") or "").casefold()
     title_str = (item.get("title") or "").casefold()
+    if "edition" in title_str or any(w in title_str for w in ["inyouchuu", "melty", "yamitsuki", "shiranai", "nagachichi", "kaede", "suzu", "shoku"]):
+        return False
     return "anime" in genre_str or "anime" in title_str
 
 @app.get("/health")
@@ -123,7 +125,7 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
         if canonical == "kids":
             all_items = []
             seen_ids = set()
-            for kw in ["disney", "animation", "cartoon", "family"]:
+            for kw in ["disney", "cartoon", "family", "pixar", "barbie"]:
                 res = session.post(
                     f"{H5_API_BASE}/subject/search",
                     json={"keyword": kw, "page": page, "perPage": 28, "subjectType": 0},
@@ -142,7 +144,7 @@ def get_catalog(name: str, page: int = 1, genre: str = Query(default=""), _ = De
         if canonical == "anime":
             all_anime = []
             seen_ids = set()
-            for kw in ["naruto", "demon slayer", "jujutsu kaisen", "spy x family", "my hero academia", "one piece", "dragon ball", "anime"]:
+            for kw in ["naruto", "demon slayer", "jujutsu kaisen", "spy x family", "my hero academia", "one piece", "dragon ball", "attack on titan"]:
                 res = session.post(
                     f"{H5_API_BASE}/subject/search",
                     json={"keyword": kw, "page": page, "perPage": 28, "subjectType": 0},
