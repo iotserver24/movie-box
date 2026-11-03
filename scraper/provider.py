@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import threading
 import time
@@ -101,7 +102,13 @@ def _nuxt_search(html: str) -> tuple[list[dict], dict]:
 
 class MovieBoxProvider:
     def __init__(self, client: httpx.Client | None = None, cache_seconds: int = 120):
-        self.client = client or httpx.Client(base_url=BASE_URL, timeout=20, follow_redirects=True)
+        proxy = os.getenv("SCRAPER_UPSTREAM_PROXY") or None
+        self.client = client or httpx.Client(
+            base_url=BASE_URL,
+            timeout=20,
+            follow_redirects=True,
+            proxy=proxy,
+        )
         self.cache_seconds = cache_seconds
         self._cache: dict[str, tuple[float, object]] = {}
         self._subjects: dict[str, dict] = {}

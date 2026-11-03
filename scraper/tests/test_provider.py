@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -23,6 +24,13 @@ def source(responses):
             value = value(request)
         return httpx.Response(200, json={"code": 0, "data": value})
     return MovieBoxProvider(httpx.Client(base_url="https://themoviebox.xyz", transport=httpx.MockTransport(handler)))
+
+
+def test_upstream_proxy_uses_configured_egress(monkeypatch):
+    monkeypatch.setenv("SCRAPER_UPSTREAM_PROXY", "http://us-proxy.example:8080")
+    with patch("scraper.provider.httpx.Client") as client_factory:
+        MovieBoxProvider()
+    assert client_factory.call_args.kwargs["proxy"] == "http://us-proxy.example:8080"
 
 
 def test_home_and_paginated_browse():

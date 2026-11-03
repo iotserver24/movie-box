@@ -36,6 +36,7 @@ class DownloadTask extends ChangeNotifier {
         'refreshing',
         'waitingToRetry',
       }.contains(_state);
+  bool get downloading => _state == 'running';
   bool get cancelled => _state == 'cancelled';
   bool get paused => _state == 'paused';
   bool get complete => _state == 'complete';
@@ -58,7 +59,7 @@ class DownloadTask extends ChangeNotifier {
   // Native root directories omit the leading separator.
   static String? _path(native.DownloadTask? task) => task == null
       ? null
-      : '${Platform.isWindows ? '' : '/'}${task.directory}/${task.filename}';
+      : '${Platform.isWindows ? '' : '/'}${task.directory}${Platform.pathSeparator}${task.filename}';
 
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -97,7 +98,8 @@ class DownloadTask extends ChangeNotifier {
         if (!cancelled) await _owner.replaceGeneration(this);
         return null;
       });
-    } catch (failure) {
+    } catch (failure, stackTrace) {
+      debugPrint('Download start error: $failure\n$stackTrace');
       if (!cancelled) {
         _state = 'failed';
         error = '$failure';
@@ -479,8 +481,10 @@ class _DownloadCoordinator {
     bool refresh = false,
   }) async {
     try {
+      debugPrint('replaceGeneration: starting for ${task.key}');
       if (task.cancelled) return;
       await backend.requestNotifications();
+      debugPrint('replaceGeneration: requestNotifications done');
       if (task.cancelled) return;
       retire(task._video);
       retire(task._subtitle);
@@ -490,12 +494,22 @@ class _DownloadCoordinator {
       if (refresh) await _refresh(task);
       if (task.cancelled) return;
       final metadata = await _probe(task);
+      debugPrint(
+        'replaceGeneration: metadata probed length=${metadata.length}',
+      );
       if (task.cancelled) return;
       task._metadata = metadata;
       task.total = metadata.length;
-      final directory =
-          await (library.downloadsDirectory?.call() ??
-              getApplicationDocumentsDirectory());
+      Directory directory;
+      try {
+        directory =
+            await (library.downloadsDirectory?.call() ??
+                getApplicationDocumentsDirectory());
+      } catch (e) {
+        debugPrint('Path provider fallback: $e');
+        directory = await getTemporaryDirectory();
+      }
+      debugPrint('replaceGeneration: download directory=${directory.path}');
       if (task.cancelled) return;
       final id = _id();
       final destination = Directory('${directory.path}/downloads/$id');
@@ -506,7 +520,8 @@ class _DownloadCoordinator {
         url: task._stream!.url,
         headers: {
           ...downloadRequestHeaders(task._stream!.headers),
-          'Known-Content-Length': '${metadata.length}',
+          if (metadata.length > 0)
+            'Known-Content-Length': '${metadata.length}',
           if (metadata.etag != null) 'If-Match': metadata.etag!,
         },
         filename: 'video.mp4',
@@ -531,7 +546,10 @@ class _DownloadCoordinator {
       task._notify();
       final video = task._video!;
       if (!_current(task, video.taskId)) return;
-      if (!await backend.enqueue(video)) {
+      debugPrint('replaceGeneration: enqueuing task ${video.taskId}');
+      final enqueued = await backend.enqueue(video);
+      debugPrint('replaceGeneration: enqueued result=$enqueued');
+      if (!enqueued) {
         throw ApiException(
           'The system could not enqueue this download. Retry to try again.',
         );
@@ -626,6 +644,7 @@ class _DownloadCoordinator {
     final isVideo = task._video?.taskId == id;
     if (update is native.TaskProgressUpdate) {
       if (!isVideo || task.complete || update.progress < 0) return;
+      if (task.active && !task.paused) task._state = 'running';
       final length = task._metadata?.length;
       if (length != null) {
         task.total = length;

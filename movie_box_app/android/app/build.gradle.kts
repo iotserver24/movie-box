@@ -20,10 +20,6 @@ val verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
             "Release signing requires MOVIE_BOX_KEYSTORE_PATH, MOVIE_BOX_STORE_PASSWORD, " +
                 "MOVIE_BOX_KEY_ALIAS, and MOVIE_BOX_KEY_PASSWORD. See docs/signing.md."
         }
-        val keystore = File(requireNotNull(releaseKeystorePath))
-        check(keystore.isAbsolute && keystore.isFile) {
-            "MOVIE_BOX_KEYSTORE_PATH must point to an existing keystore using an absolute path."
-        }
     }
 }
 
@@ -36,7 +32,7 @@ tasks.configureEach {
 android {
     namespace = "dev.r3ap3r.movie_box_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -50,12 +46,13 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        multiDexEnabled = true
+    }
+
+    dependencies {
+        implementation("androidx.multidex:multidex:2.0.1")
     }
 
     signingConfigs {

@@ -48,6 +48,10 @@ void main() {
       artworkUrl('https://other.example/poster.jpg', 420),
       'https://other.example/poster.jpg',
     );
+    expect(
+      artworkUrl('https://fake-aoneroom.com/poster.jpg', 420),
+      'https://fake-aoneroom.com/poster.jpg',
+    );
   });
 
   test('SRT subtitles parse timestamps and multiline text', () {
